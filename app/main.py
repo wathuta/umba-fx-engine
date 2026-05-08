@@ -13,6 +13,7 @@ from app.core.errors import (
     bad_request,
     http_error_handler,
     problem_response,
+    unhandled_error_handler,
     validation_error,
 )
 from app.core.observability import RequestIdMiddleware
@@ -29,6 +30,7 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestIdMiddleware)
     app.add_exception_handler(ApiError, api_error_handler)
     app.add_exception_handler(HTTPException, http_error_handler)
+    app.add_exception_handler(Exception, unhandled_error_handler)
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_handler(request: Request, exc: RequestValidationError) -> JSONResponse:

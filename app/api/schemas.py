@@ -97,3 +97,7 @@ class HealthResponse(BaseModel):
     status: str
     database: str
     rates: str
+
+
+class ReadinessResponse(HealthResponse):
+    pass

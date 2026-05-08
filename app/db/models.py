@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -65,6 +65,14 @@ class RateSnapshot(Base):
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     raw_payload_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    __table_args__ = (
+        Index(
+            "ix_rate_snapshots_pair_fetched_at_desc",
+            "base_currency",
+            "quote_currency",
+            fetched_at.desc(),
+        ),
+    )
 
 
 class CurrentRate(Base):

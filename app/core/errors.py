@@ -4,12 +4,16 @@ The API uses problem+json so clients can make decisions from stable machine
 codes instead of parsing human-readable messages.
 """
 
+import json
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 from fastapi import Request
 from fastapi.exceptions import HTTPException
 from fastapi.responses import JSONResponse
+
+logger = logging.getLogger("fx")
 
 
 @dataclass(slots=True)
@@ -44,6 +48,21 @@ async def http_error_handler(request: Request, exc: HTTPException) -> JSONRespon
     return problem_response(
         ApiError(exc.status_code, "http_error", title, str(exc.detail)),
         getattr(request.state, "request_id", None),
+    )
+
+
+async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    request_id = getattr(request.state, "request_id", None)
+    logger.exception(
+        json.dumps(
+            {"event": "unhandled_error", "error_type": type(exc).__name__, "request_id": request_id},
+            default=str,
+            sort_keys=True,
+        )
+    )
+    return problem_response(
+        ApiError(500, "internal_error", "Internal server error", "An unexpected error occurred."),
+        request_id,
     )
 
 

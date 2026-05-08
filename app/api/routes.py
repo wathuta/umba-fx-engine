@@ -15,6 +15,7 @@ from app.api.schemas import (
     QuoteRequest,
     QuoteResponse,
     RateRefreshResponse,
+    ReadinessResponse,
 )
 from app.core.errors import ApiError
 from app.core.money import Currency
@@ -108,6 +109,7 @@ def refresh_rates_endpoint(request: Request, session: Session = Depends(get_db))
 
 @router.get("/healthz", response_model=HealthResponse)
 def healthz(session: Session = Depends(get_db)) -> HealthResponse:
+    """Report process health while exposing DB and rate freshness details."""
     db_status = "ok"
     rates_status = "ok"
     try:
@@ -119,6 +121,20 @@ def healthz(session: Session = Depends(get_db)) -> HealthResponse:
     except ApiError:
         rates_status = "stale"
     return HealthResponse(status="ok" if db_status == "ok" else "unhealthy", database=db_status, rates=rates_status)
+
+
+@router.get("/readyz", response_model=ReadinessResponse)
+def readyz(session: Session = Depends(get_db)) -> ReadinessResponse:
+    """Report readiness for quote traffic; stale rates make the service not ready."""
+    try:
+        session.execute(text("SELECT 1"))
+    except Exception:
+        return ReadinessResponse(status="unhealthy", database="unhealthy", rates="unknown")
+    try:
+        ensure_fresh_rates(session)
+    except ApiError:
+        return ReadinessResponse(status="unhealthy", database="ok", rates="stale")
+    return ReadinessResponse(status="ok", database="ok", rates="ok")
 
 
 @router.get("/metrics")
