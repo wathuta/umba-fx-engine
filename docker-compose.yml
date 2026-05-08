@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: fx_takehome_postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-fx_takehome}
+      POSTGRES_USER: ${POSTGRES_USER:-fx_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fx_password}
+    ports:
+      - "${POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres_data:
