@@ -39,13 +39,21 @@ def get_balances_endpoint(customer_id: UUID, session: Session = Depends(get_db))
 
 
 @router.post("/customers/{customer_id}/balance-credits", response_model=BalanceResponse)
-def credit_balance_endpoint(customer_id: UUID, payload: BalanceCreditRequest, session: Session = Depends(get_db)) -> BalanceResponse:
+def credit_balance_endpoint(
+    customer_id: UUID,
+    payload: BalanceCreditRequest,
+    session: Session = Depends(get_db),
+) -> BalanceResponse:
     amount = credit_balance(session, customer_id, Currency(payload.currency), payload.amount)
     return BalanceResponse(currency=payload.currency, amount=amount)
 
 
 @router.post("/quotes", response_model=QuoteResponse)
-def create_quote_endpoint(payload: QuoteRequest, request: Request, session: Session = Depends(get_db)) -> QuoteResponse:
+def create_quote_endpoint(
+    payload: QuoteRequest,
+    request: Request,
+    session: Session = Depends(get_db),
+) -> QuoteResponse:
     """Price an immutable quote without reading or mutating customer balances."""
     quote = create_quote(
         session,

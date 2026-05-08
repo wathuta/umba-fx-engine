@@ -58,7 +58,11 @@ class RateProvider:
         if settings.rate_provider_api_key:
             params["access_key"] = settings.rate_provider_api_key
         try:
-            response = httpx.get(settings.rate_provider_url, params=params, timeout=settings.rate_provider_timeout_seconds)
+            response = httpx.get(
+                settings.rate_provider_url,
+                params=params,
+                timeout=settings.rate_provider_timeout_seconds,
+            )
         except httpx.TimeoutException as exc:
             raise gateway_timeout("Rate provider timed out.") from exc
         except httpx.HTTPError as exc:
@@ -93,7 +97,11 @@ def pair_mid_rate(provider_rates: ProviderRates, base: Currency, quote: Currency
     return provider_rates.rates[quote] / provider_rates.rates[base]
 
 
-def refresh_rates(session: Session, provider: RateProvider | None = None, request_id: str | None = None) -> tuple[UUID, str, datetime, int]:
+def refresh_rates(
+    session: Session,
+    provider: RateProvider | None = None,
+    request_id: str | None = None,
+) -> tuple[UUID, str, datetime, int]:
     """Persist one audited refresh attempt and update current rates only on success."""
     provider = provider or RateProvider()
     settings = get_settings()
@@ -176,7 +184,9 @@ def refresh_rates(session: Session, provider: RateProvider | None = None, reques
 
 def ensure_fresh_rates(session: Session) -> None:
     """Fail quotes when the latest current rate is outside the freshness window."""
-    latest = session.execute(select(CurrentRate).order_by(CurrentRate.last_updated_at.desc()).limit(1)).scalar_one_or_none()
+    latest = session.execute(
+        select(CurrentRate).order_by(CurrentRate.last_updated_at.desc()).limit(1)
+    ).scalar_one_or_none()
     if latest is None:
         stale_rates_total.inc()
         raise service_unavailable("rates_stale", "Rates are unavailable.")

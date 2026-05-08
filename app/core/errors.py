@@ -40,8 +40,9 @@ async def api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
 
 
 async def http_error_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    title = exc.detail if isinstance(exc.detail, str) else "HTTP error"
     return problem_response(
-        ApiError(exc.status_code, "http_error", exc.detail if isinstance(exc.detail, str) else "HTTP error", str(exc.detail)),
+        ApiError(exc.status_code, "http_error", title, str(exc.detail)),
         getattr(request.state, "request_id", None),
     )
 

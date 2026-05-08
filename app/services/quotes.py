@@ -49,7 +49,9 @@ def build_route(session: Session, source: Currency, destination: Currency) -> li
     if find_current_rate(session, source, destination):
         return [source, destination]
     for pivot in (Currency.USD, Currency.EUR):
-        if pivot not in (source, destination) and find_current_rate(session, source, pivot) and find_current_rate(session, pivot, destination):
+        source_to_pivot = find_current_rate(session, source, pivot)
+        pivot_to_destination = find_current_rate(session, pivot, destination)
+        if pivot not in (source, destination) and source_to_pivot and pivot_to_destination:
             return [source, pivot, destination]
     raise service_unavailable("rates_stale", f"No route available for {source.value}/{destination.value}.")
 
@@ -86,7 +88,7 @@ def create_quote(
     executable_rate = Decimal("1")
     spread_bps = 0
     rate_snapshot_id: UUID | None = None
-    for source, destination in zip(route, route[1:]):
+    for source, destination in zip(route, route[1:], strict=False):
         current_rate = find_current_rate(session, source, destination)
         if current_rate is None:
             raise service_unavailable("rates_stale", f"Rate missing for {source.value}/{destination.value}.")

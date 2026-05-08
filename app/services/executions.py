@@ -58,7 +58,10 @@ def execute_quote(
     if not idempotency_key:
         raise conflict("idempotency_conflict", "Idempotency-Key is required.")
     existing_key = session.execute(
-        select(IdempotencyKey).where(IdempotencyKey.endpoint == "POST /executions", IdempotencyKey.key == idempotency_key)
+        select(IdempotencyKey).where(
+            IdempotencyKey.endpoint == "POST /executions",
+            IdempotencyKey.key == idempotency_key,
+        )
     ).scalar_one_or_none()
     if existing_key is not None:
         if existing_key.request_hash != req_hash:
@@ -84,7 +87,9 @@ def execute_quote(
         if quote is None:
             session.rollback()
             raise not_found("quote_not_found", f"Quote {quote_id} not found.")
-        existing_execution = session.execute(select(Execution).where(Execution.quote_id == quote_id)).scalar_one_or_none()
+        existing_execution = session.execute(
+            select(Execution).where(Execution.quote_id == quote_id)
+        ).scalar_one_or_none()
         if existing_execution is not None:
             session.rollback()
             raise conflict("quote_already_executed", "Quote has already been executed.")
@@ -101,7 +106,9 @@ def execute_quote(
         # Create missing balance rows before row locks so lock order stays stable.
         for currency in currencies:
             get_balance(session, quote.customer_id, currency, for_update=False)
-        locked = {currency: get_balance(session, quote.customer_id, currency, for_update=True) for currency in currencies}
+        locked = {
+            currency: get_balance(session, quote.customer_id, currency, for_update=True) for currency in currencies
+        }
         source_balance = locked[source_currency]
         destination_balance = locked[destination_currency]
         if source_balance.balance < quote.source_amount:
@@ -112,7 +119,10 @@ def execute_quote(
         # Test hook proves the debit and credit are protected by the same DB transaction.
         if fail_after_debit:
             raise RuntimeError("injected failure after debit")
-        destination_balance.balance = round_money(destination_balance.balance + quote.destination_amount, destination_currency)
+        destination_balance.balance = round_money(
+            destination_balance.balance + quote.destination_amount,
+            destination_currency,
+        )
         execution = Execution(
             quote_id=quote.id,
             customer_id=quote.customer_id,

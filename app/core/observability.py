@@ -12,7 +12,6 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.errors import problem_response, unsupported_media_type
 
-
 logger = logging.getLogger("fx")
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 

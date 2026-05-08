@@ -38,4 +38,3 @@ def credit_balance(session: Session, customer_id: UUID, currency: Currency, amou
         balance.balance = round_money(balance.balance + rounded, currency)
     session.commit()
     return balance.balance
-

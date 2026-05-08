@@ -7,7 +7,14 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 
 from app.api.routes import router
-from app.core.errors import ApiError, api_error_handler, bad_request, http_error_handler, problem_response, validation_error
+from app.core.errors import (
+    ApiError,
+    api_error_handler,
+    bad_request,
+    http_error_handler,
+    problem_response,
+    validation_error,
+)
 from app.core.observability import RequestIdMiddleware
 from app.db.session import create_all
 

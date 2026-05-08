@@ -23,4 +23,3 @@ def create_all() -> None:
     from app.db import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
-

@@ -4,7 +4,7 @@ Keeping Decimal conversion, currency metadata, and rounding here prevents
 different services from silently applying different financial rules.
 """
 
-from decimal import Decimal, ROUND_HALF_EVEN, localcontext
+from decimal import ROUND_HALF_EVEN, Decimal, localcontext
 from enum import StrEnum
 
 

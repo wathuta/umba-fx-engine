@@ -7,4 +7,4 @@ sqlalchemy>=2.0.32
 uvicorn>=0.30.0
 hypothesis>=6.112.0
 pytest>=8.3.0
-
+ruff>=0.8.0

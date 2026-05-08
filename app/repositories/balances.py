@@ -42,4 +42,3 @@ def list_balances(session: Session, customer_id: UUID) -> dict[Currency, Decimal
     rows = session.execute(select(Balance).where(Balance.customer_id == customer_id)).scalars().all()
     values = {Currency(row.currency): row.balance for row in rows}
     return {currency: round_money(values.get(currency, Decimal("0.00")), currency) for currency in Currency}
-
