@@ -15,6 +15,13 @@ from app.core.errors import problem_response, unsupported_media_type
 logger = logging.getLogger("fx")
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
+# Media types for JSON requests and Prometheus metrics.
+CONTENT_TYPE_JSON = "application/json"
+CONTENT_TYPE_PROMETHEUS = "text/plain; version=0.0.4"
+
+# Request IDs are propagated through responses, errors, and structured logs.
+HEADER_REQUEST_ID = "X-Request-ID"
+
 quote_created_total = Counter("fx_quote_created_total", "Quotes created")
 quote_expired_total = Counter("fx_quote_expired_total", "Expired quote execution attempts")
 execution_success_total = Counter("fx_execution_success_total", "Successful executions")
@@ -35,12 +42,12 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
     """Attach one request ID to responses, errors, and structured log events."""
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        request_id = request.headers.get("X-Request-ID") or str(uuid4())
+        request_id = request.headers.get(HEADER_REQUEST_ID) or str(uuid4())
         request.state.request_id = request_id
         if _has_unsupported_json_content(request):
             return problem_response(unsupported_media_type("Request body must be application/json."), request_id)
         response = await call_next(request)
-        response.headers["X-Request-ID"] = request_id
+        response.headers[HEADER_REQUEST_ID] = request_id
         return response
 
 
@@ -50,7 +57,7 @@ def _has_unsupported_json_content(request: Request) -> bool:
     if request.headers.get("content-length") in {None, "0"}:
         return False
     content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
-    return content_type != "application/json"
+    return content_type != CONTENT_TYPE_JSON
 
 
 def log_event(event: str, **fields: object) -> None:
@@ -60,7 +67,7 @@ def log_event(event: str, **fields: object) -> None:
 
 
 def metrics_response() -> Response:
-    return Response(generate_latest(), media_type="text/plain; version=0.0.4")
+    return Response(generate_latest(), media_type=CONTENT_TYPE_PROMETHEUS)
 
 
 def now_ms() -> float:

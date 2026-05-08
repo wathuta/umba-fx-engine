@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from app.core.constants import ZERO_MONEY
 from app.core.money import Currency, round_money
 from app.db.models import Balance
 
@@ -12,7 +13,7 @@ from app.db.models import Balance
 def ensure_balance(session: Session, customer_id: UUID, currency: Currency) -> Balance:
     stmt = (
         insert(Balance)
-        .values(customer_id=customer_id, currency=currency.value, balance=Decimal("0.00"))
+        .values(customer_id=customer_id, currency=currency.value, balance=ZERO_MONEY)
         .on_conflict_do_nothing(index_elements=["customer_id", "currency"])
     )
     session.execute(stmt)
@@ -41,4 +42,4 @@ def list_balances(session: Session, customer_id: UUID) -> dict[Currency, Decimal
     ensure_all_balances(session, customer_id)
     rows = session.execute(select(Balance).where(Balance.customer_id == customer_id)).scalars().all()
     values = {Currency(row.currency): row.balance for row in rows}
-    return {currency: round_money(values.get(currency, Decimal("0.00")), currency) for currency in Currency}
+    return {currency: round_money(values.get(currency, ZERO_MONEY), currency) for currency in Currency}

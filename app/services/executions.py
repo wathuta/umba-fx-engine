@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.constants import EXECUTIONS_PATH, HTTP_POST, OUTCOME_SUCCESS
 from app.core.errors import conflict, not_found
 from app.core.money import Currency, round_money
 from app.core.observability import (
@@ -29,6 +30,14 @@ from app.core.observability import (
 from app.db.models import Execution, IdempotencyKey, Quote
 from app.repositories.balances import get_balance
 
+# Execution conflict code and log event name.
+ERROR_IDEMPOTENCY_CONFLICT = "idempotency_conflict"
+EVENT_EXECUTION_COMPLETED = "execution.completed"
+
+# Response field names for execution debit/credit legs.
+FIELD_AMOUNT = "amount"
+FIELD_CURRENCY = "currency"
+
 
 def request_hash(method: str, path: str, body: dict) -> str:
     """Bind an idempotency key to the exact execution request payload."""
@@ -40,8 +49,8 @@ def _execution_response(execution: Execution, balances: dict[Currency, Decimal])
     return {
         "execution_id": str(execution.id),
         "quote_id": str(execution.quote_id),
-        "debit": {"currency": execution.debit_currency, "amount": str(execution.debit_amount)},
-        "credit": {"currency": execution.credit_currency, "amount": str(execution.credit_amount)},
+        "debit": {FIELD_CURRENCY: execution.debit_currency, FIELD_AMOUNT: str(execution.debit_amount)},
+        "credit": {FIELD_CURRENCY: execution.credit_currency, FIELD_AMOUNT: str(execution.credit_amount)},
         "balances": {currency.value: str(amount) for currency, amount in balances.items()},
     }
 
@@ -56,31 +65,34 @@ def execute_quote(
 ) -> tuple[dict, bool]:
     """Execute stored quote terms exactly once, or return an idempotent replay."""
     if not idempotency_key:
-        raise conflict("idempotency_conflict", "Idempotency-Key is required.")
+        raise conflict(ERROR_IDEMPOTENCY_CONFLICT, "Idempotency-Key is required.")
     existing_key = session.execute(
         select(IdempotencyKey).where(
-            IdempotencyKey.endpoint == "POST /executions",
+            IdempotencyKey.endpoint == f"{HTTP_POST} {EXECUTIONS_PATH}",
             IdempotencyKey.key == idempotency_key,
         )
     ).scalar_one_or_none()
     if existing_key is not None:
         if existing_key.request_hash != req_hash:
             idempotency_conflict_total.inc()
-            raise conflict("idempotency_conflict", "Idempotency-Key was already used with a different request.")
+            raise conflict(
+                ERROR_IDEMPOTENCY_CONFLICT,
+                "Idempotency-Key was already used with a different request.",
+            )
         if existing_key.completed_at and existing_key.response_payload:
             idempotency_replay_total.inc()
             return existing_key.response_payload, True
         idempotency_conflict_total.inc()
-        raise conflict("idempotency_conflict", "Idempotency-Key is already in flight.")
+        raise conflict(ERROR_IDEMPOTENCY_CONFLICT, "Idempotency-Key is already in flight.")
 
-    idem = IdempotencyKey(endpoint="POST /executions", key=idempotency_key, request_hash=req_hash)
+    idem = IdempotencyKey(endpoint=f"{HTTP_POST} {EXECUTIONS_PATH}", key=idempotency_key, request_hash=req_hash)
     try:
         session.add(idem)
         session.flush()
     except IntegrityError as exc:
         session.rollback()
         idempotency_conflict_total.inc()
-        raise conflict("idempotency_conflict", "Idempotency-Key is already in use.") from exc
+        raise conflict(ERROR_IDEMPOTENCY_CONFLICT, "Idempotency-Key is already in use.") from exc
 
     try:
         quote = session.execute(select(Quote).where(Quote.id == quote_id).with_for_update()).scalar_one_or_none()
@@ -103,7 +115,7 @@ def execute_quote(
         source_currency = Currency(quote.source_currency)
         destination_currency = Currency(quote.destination_currency)
         currencies = sorted((source_currency, destination_currency), key=lambda c: c.value)
-        # Create missing balance rows before row locks so lock order stays stable.
+        # Create missing balance rows before row locks so lock order is predictable.
         for currency in currencies:
             get_balance(session, quote.customer_id, currency, for_update=False)
         locked = {
@@ -144,7 +156,7 @@ def execute_quote(
         session.commit()
         execution_success_total.inc()
         log_event(
-            "execution.completed",
+            EVENT_EXECUTION_COMPLETED,
             request_id=request_id,
             customer_id=quote.customer_id,
             quote_id=quote.id,
@@ -155,7 +167,7 @@ def execute_quote(
             source_amount=str(quote.source_amount),
             destination_amount=str(quote.destination_amount),
             executable_rate=str(quote.executable_rate),
-            outcome="success",
+            outcome=OUTCOME_SUCCESS,
         )
         return payload, False
     except Exception:

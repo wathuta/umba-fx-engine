@@ -5,6 +5,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_valid
 
 from app.core.money import Currency, decimal_to_str
 
+# Validator mode is local Pydantic configuration for pre-parsing checks.
+VALIDATOR_MODE_BEFORE = "before"
+
+# Amount inputs have to be greater than zero.
+MIN_AMOUNT_EXCLUSIVE = Decimal("0")
+
 
 class DecimalStringModel(BaseModel):
     model_config = ConfigDict(use_enum_values=True)
@@ -28,9 +34,9 @@ class CustomerResponse(BaseModel):
 
 class BalanceCreditRequest(BaseModel):
     currency: Currency
-    amount: Decimal = Field(gt=Decimal("0"))
+    amount: Decimal = Field(gt=MIN_AMOUNT_EXCLUSIVE)
 
-    @field_validator("amount", mode="before")
+    @field_validator("amount", mode=VALIDATOR_MODE_BEFORE)
     @classmethod
     def amount_must_be_string(cls, value: object) -> object:
         return require_decimal_string(value)
@@ -50,9 +56,9 @@ class QuoteRequest(BaseModel):
     customer_id: UUID
     source_currency: Currency
     destination_currency: Currency
-    source_amount: Decimal = Field(gt=Decimal("0"))
+    source_amount: Decimal = Field(gt=MIN_AMOUNT_EXCLUSIVE)
 
-    @field_validator("source_amount", mode="before")
+    @field_validator("source_amount", mode=VALIDATOR_MODE_BEFORE)
     @classmethod
     def source_amount_must_be_string(cls, value: object) -> object:
         return require_decimal_string(value)

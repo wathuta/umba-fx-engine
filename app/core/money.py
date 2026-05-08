@@ -7,6 +7,14 @@ different services from silently applying different financial rules.
 from decimal import ROUND_HALF_EVEN, Decimal, localcontext
 from enum import StrEnum
 
+from app.core.constants import DECIMAL_ONE
+
+# Supported fiat currencies all use two stored/display decimal places.
+STANDARD_MINOR_UNIT_PLACES = 2
+
+# Executable rates are stored and returned at ten decimal places.
+RATE_QUANT = Decimal("0.0000000001")
+
 
 class Currency(StrEnum):
     USD = "USD"
@@ -16,14 +24,13 @@ class Currency(StrEnum):
 
 
 CURRENCY_DECIMAL_PLACES: dict[Currency, int] = {
-    Currency.USD: 2,
-    Currency.EUR: 2,
-    Currency.KES: 2,
-    Currency.NGN: 2,
+    Currency.USD: STANDARD_MINOR_UNIT_PLACES,
+    Currency.EUR: STANDARD_MINOR_UNIT_PLACES,
+    Currency.KES: STANDARD_MINOR_UNIT_PLACES,
+    Currency.NGN: STANDARD_MINOR_UNIT_PLACES,
 }
 
 SUPPORTED_CURRENCIES = tuple(Currency)
-RATE_QUANT = Decimal("0.0000000001")
 
 
 def parse_decimal(value: Decimal | str) -> Decimal:
@@ -34,7 +41,7 @@ def parse_decimal(value: Decimal | str) -> Decimal:
 
 def money_quant(currency: Currency) -> Decimal:
     places = CURRENCY_DECIMAL_PLACES[currency]
-    return Decimal("1").scaleb(-places)
+    return DECIMAL_ONE.scaleb(-places)
 
 
 def round_money(amount: Decimal, currency: Currency) -> Decimal:
