@@ -1,12 +1,18 @@
 from datetime import UTC, datetime
 from decimal import Decimal
 
+import httpx
 import pytest
+from hypothesis import HealthCheck, assume, given, settings
+from hypothesis import strategies as st
 from sqlalchemy import delete, func, select
 
+from app.core.constants import DECIMAL_ONE
 from app.core.errors import ApiError, bad_gateway, gateway_timeout
 from app.core.money import Currency, round_money, round_rate
 from app.db.models import CurrentRate, Quote, QuoteLeg, RateRefresh
+from app.services.customers import create_customer
+from app.services.quotes import create_quote
 from app.services.rates import CANONICAL_PAIRS, ProviderRates, RateProvider, refresh_rates
 from tests.conftest import seed_rates
 from tests.unit.helpers import create_customer_with_usd
@@ -70,6 +76,26 @@ def test_fxapi_provider_payload_is_parsed(monkeypatch):
     assert rates.base_currency == Currency.USD
     assert rates.rates[Currency.KES] == Decimal("129.149265")
     assert rates.provider_timestamp is not None
+
+
+def test_httpx_timeout_is_audited_without_replacing_current_rates(db_session, monkeypatch):
+    seed_rates(db_session)
+    before = db_session.execute(select(func.count()).select_from(CurrentRate)).scalar_one()
+
+    def raise_timeout(*args, **kwargs):
+        raise httpx.ReadTimeout("timed out")
+
+    monkeypatch.setattr("app.services.rates.httpx.get", raise_timeout)
+
+    with pytest.raises(ApiError) as exc:
+        refresh_rates(db_session)
+
+    after = db_session.execute(select(func.count()).select_from(CurrentRate)).scalar_one()
+    failed_refresh = db_session.execute(select(RateRefresh).where(RateRefresh.status == "failed")).scalar_one()
+
+    assert exc.value.code == "upstream_timeout"
+    assert after == before
+    assert failed_refresh.error_code == "upstream_timeout"
 
 
 def test_refresh_rates_writes_one_canonical_orientation_per_pair(db_session):
@@ -172,6 +198,36 @@ def test_direct_route_creates_single_leg(client, db_session, seeded_rates):
     assert legs[0].spread_side == "sell"
     assert legs[0].spread_bps == quote.spread_bps
     assert legs[0].executable_rate == quote.executable_rate
+
+
+@given(
+    source=st.sampled_from(list(Currency)),
+    destination=st.sampled_from(list(Currency)),
+    amount=st.decimals(
+        min_value="0.01",
+        max_value="1000000.00",
+        places=2,
+        allow_nan=False,
+        allow_infinity=False,
+    ),
+)
+@settings(max_examples=30, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
+def test_create_quote_property_invariants(db_session, seeded_rates, source, destination, amount):
+    """Random `(source, destination, amount)` triples must hold pricing invariants per SPEC §15."""
+    assume(source != destination)
+    customer_id = create_customer(db_session)
+
+    quote = create_quote(db_session, customer_id, source, destination, amount)
+    legs = db_session.execute(
+        select(QuoteLeg).where(QuoteLeg.quote_id == quote.id).order_by(QuoteLeg.position)
+    ).scalars().all()
+
+    reproduced = DECIMAL_ONE
+    for leg in legs:
+        reproduced *= leg.executable_rate
+    assert quote.executable_rate == round_rate(reproduced)
+    assert quote.destination_amount == round_money(quote.source_amount * quote.executable_rate, destination)
+    assert len(legs) == len(quote.route) - 1
 
 
 @pytest.mark.parametrize(

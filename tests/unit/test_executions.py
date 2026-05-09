@@ -33,8 +33,8 @@ def test_execution_requires_idempotency_key(client, seeded_rates):
 
     response = client.post("/executions", json={"quote_id": quote_id})
 
-    assert response.status_code == 409
-    assert response.json()["code"] == "idempotency_conflict"
+    assert response.status_code == 422
+    assert response.json()["code"] == "validation_error"
 
 
 def test_quote_can_execute_only_once(client, seeded_rates):

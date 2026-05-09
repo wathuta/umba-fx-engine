@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.constants import ZERO_MONEY
 from app.core.money import Currency, round_money
-from app.db.models import Balance, UQ_BALANCES_CUSTOMER_CURRENCY
+from app.db.models import UQ_BALANCES_CUSTOMER_CURRENCY, Balance
 
 
 def ensure_balance(session: Session, customer_id: UUID, currency: Currency) -> Balance:

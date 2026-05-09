@@ -33,8 +33,7 @@ def get_balances(session: Session, customer_id: UUID) -> dict[Currency, Decimal]
 def credit_balance(session: Session, customer_id: UUID, currency: Currency, amount: Decimal) -> Decimal:
     assert_customer_exists(session, customer_id)
     rounded = round_money(amount, currency)
-    with session.begin_nested():
-        balance = get_balance(session, customer_id, currency, for_update=True)
-        balance.balance = round_money(balance.balance + rounded, currency)
+    balance = get_balance(session, customer_id, currency, for_update=True)
+    balance.balance = round_money(balance.balance + rounded, currency)
     session.commit()
     return balance.balance

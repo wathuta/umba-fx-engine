@@ -28,7 +28,7 @@ from app.core.observability import (
     rate_refresh_success_total,
     stale_rates_total,
 )
-from app.db.models import CurrentRate, RateRefresh, RateSnapshot, UQ_CURRENT_RATES_PAIR
+from app.db.models import UQ_CURRENT_RATES_PAIR, CurrentRate, RateRefresh, RateSnapshot
 
 # Upstream failures from the provider are normalized to this client-facing code.
 ERROR_UPSTREAM_BAD_RESPONSE = "upstream_bad_response"
@@ -173,6 +173,7 @@ def refresh_rates(
             updated += 1
         refresh.pairs_updated = updated
         refresh.duration_ms = _duration_ms(started)
+        # Single commit: quotes reading current_rates see either all-old or all-new rates, never a partial refresh.
         session.commit()
         rate_refresh_success_total.inc()
         rate_refresh_latency_ms.observe(refresh.duration_ms)

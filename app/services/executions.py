@@ -16,7 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.constants import EXECUTIONS_PATH, HTTP_POST, OUTCOME_SUCCESS
-from app.core.errors import conflict, not_found
+from app.core.errors import conflict, not_found, validation_error
 from app.core.money import Currency, round_money
 from app.core.observability import (
     execution_failure_total,
@@ -65,7 +65,7 @@ def execute_quote(
 ) -> tuple[dict, bool]:
     """Execute stored quote terms exactly once, or return an idempotent replay."""
     if not idempotency_key:
-        raise conflict(ERROR_IDEMPOTENCY_CONFLICT, "Idempotency-Key is required.")
+        raise validation_error("Idempotency-Key is required.")
     existing_key = session.execute(
         select(IdempotencyKey).where(
             IdempotencyKey.endpoint == _EXECUTIONS_ENDPOINT,
@@ -82,8 +82,6 @@ def execute_quote(
         if existing_key.completed_at and existing_key.response_payload:
             idempotency_replay_total.inc()
             return existing_key.response_payload, True
-        idempotency_conflict_total.inc()
-        raise conflict(ERROR_IDEMPOTENCY_CONFLICT, "Idempotency-Key is already in flight.")
 
     idem = IdempotencyKey(endpoint=_EXECUTIONS_ENDPOINT, key=idempotency_key, request_hash=req_hash)
     try:

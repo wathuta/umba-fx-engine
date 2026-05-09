@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from prometheus_fastapi_instrumentator import Instrumentator
 from starlette.exceptions import HTTPException
 
 from app.api.routes import router
@@ -16,10 +17,9 @@ from app.core.errors import (
     unhandled_error_handler,
     validation_error,
 )
-from prometheus_fastapi_instrumentator import Instrumentator
-
 from app.core.observability import RequestIdMiddleware
 from app.db.session import create_all
+
 
 def create_app() -> FastAPI:
     @asynccontextmanager

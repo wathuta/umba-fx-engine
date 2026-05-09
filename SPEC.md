@@ -15,7 +15,8 @@ Build a FastAPI + Postgres FX engine for USD, EUR, KES, and NGN with customer ba
 - Spreads: integer basis points.
 - Currency decimal places: USD/EUR/KES/NGN = 2.
 - Rounding: `ROUND_HALF_EVEN`, set explicitly in code.
-- Intermediate FX calculations keep high precision.
+- Leg mid-rate/spread math uses `Decimal`; persisted leg executable rates are rounded to `NUMERIC(20,10)` before storage and compounding.
+- Final destination amount is rounded once at the destination currency decimal places.
 
 ## 3. Core Tables
 - `customers`: customer identity.
@@ -64,7 +65,7 @@ Build a FastAPI + Postgres FX engine for USD, EUR, KES, and NGN with customer ba
 - `source_amount > 0`.
 - `created_at = now`.
 - `expires_at = created_at + 60 seconds`.
-- Quote records executable rate, route, total spread bps, source amount, destination amount, and expiry. Per-leg pricing detail (mid rate, executable rate, spread side/bps, snapshot id) is stored in `quote_legs`; rebuild a quote's provenance from there.
+- Quote records executable rate, route, additive spread-bps summary, source amount, destination amount, and expiry. Per-leg pricing detail (mid rate, executable rate, spread side/bps, snapshot id) is stored in `quote_legs`; rebuild pricing provenance from there.
 - Quote and quote_leg rows are never updated after they are written.
 - Quote creation never reads, reserves, debits, credits, or mutates balances.
 - Execution uses stored quote terms and never recomputes rates.
@@ -104,7 +105,7 @@ Routing:
 - Else route through EUR.
 - `current_rates` stores one canonical orientation per currency pair; inverses are derived in code.
 - Cross routes compute an executable rate per leg.
-- Cross-route executable rate = product of leg executable rates.
+- Cross-route executable rate = rounded product of stored leg executable rates.
 - Cross-route spreads compound per leg.
 
 Spread direction:

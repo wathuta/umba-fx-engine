@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_valid
 
 from app.core.money import Currency, decimal_to_str
 
+
 class DecimalStringModel(BaseModel):
     model_config = ConfigDict(use_enum_values=True)
 

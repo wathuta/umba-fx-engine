@@ -150,9 +150,9 @@ def test_quote_without_rates_fails_safely(client):
 def test_execute_requires_idempotency_key(client):
     response = client.post("/executions", json={"quote_id": str(uuid.uuid4())})
 
-    assert response.status_code == 409
+    assert response.status_code == 422
     assert response.headers["content-type"].startswith("application/problem+json")
-    assert response.json()["code"] == "idempotency_conflict"
+    assert response.json()["code"] == "validation_error"
 
 
 def test_execute_unknown_quote_returns_404_with_key(client):

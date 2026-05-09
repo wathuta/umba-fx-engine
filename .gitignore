@@ -16,6 +16,8 @@ env/
 .env.*
 !.env.example
 
+docs/
+
 *.db
 *.sqlite
 *.sqlite3
