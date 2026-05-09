@@ -6,7 +6,7 @@ from sqlalchemy import delete, func, select
 
 from app.core.errors import ApiError, bad_gateway, gateway_timeout
 from app.core.money import Currency, round_money, round_rate
-from app.db.models import CurrentRate, Quote, RateRefresh
+from app.db.models import CurrentRate, Quote, QuoteLeg, RateRefresh
 from app.services.rates import CANONICAL_PAIRS, ProviderRates, RateProvider, refresh_rates
 from tests.conftest import seed_rates
 from tests.unit.helpers import create_customer_with_usd
@@ -131,12 +131,47 @@ def test_cross_route_compounds_leg_spreads(client, db_session, seeded_rates):
     expected_rate = round_rate(leg_one * leg_two)
     expected_destination = round_money(Decimal("100.00") * expected_rate, Currency.NGN)
     quote = db_session.execute(select(Quote)).scalar_one()
+    legs = db_session.execute(
+        select(QuoteLeg).where(QuoteLeg.quote_id == quote.id).order_by(QuoteLeg.position)
+    ).scalars().all()
 
     assert response.status_code == 200
     assert response.json()["route"] == ["KES", "USD", "NGN"]
     assert response.json()["executable_rate"] == str(expected_rate)
     assert response.json()["destination_amount"] == str(expected_destination)
     assert quote.spread_bps == 100
+    assert [leg.position for leg in legs] == [0, 1]
+    assert [(leg.source_currency, leg.destination_currency) for leg in legs] == [("KES", "USD"), ("USD", "NGN")]
+    assert legs[0].spread_side == "buy" and legs[1].spread_side == "sell"
+    assert legs[0].executable_rate == leg_one and legs[1].executable_rate == leg_two
+    assert legs[0].rate_snapshot_id != legs[1].rate_snapshot_id
+
+
+def test_direct_route_creates_single_leg(client, db_session, seeded_rates):
+    customer_id = create_customer_with_usd(client)
+
+    response = client.post(
+        "/quotes",
+        json={
+            "customer_id": customer_id,
+            "source_currency": "USD",
+            "destination_currency": "KES",
+            "source_amount": "100.00",
+        },
+    )
+
+    quote = db_session.execute(select(Quote)).scalar_one()
+    legs = db_session.execute(
+        select(QuoteLeg).where(QuoteLeg.quote_id == quote.id).order_by(QuoteLeg.position)
+    ).scalars().all()
+
+    assert response.status_code == 200
+    assert len(legs) == 1
+    assert legs[0].position == 0
+    assert legs[0].source_currency == "USD" and legs[0].destination_currency == "KES"
+    assert legs[0].spread_side == "sell"
+    assert legs[0].spread_bps == quote.spread_bps
+    assert legs[0].executable_rate == quote.executable_rate
 
 
 @pytest.mark.parametrize(

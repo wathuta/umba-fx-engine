@@ -63,7 +63,7 @@ If migrations exist, run the project migration command before tests.
 * Accept and return money/rates as decimal strings.
 * Set `ROUND_HALF_EVEN` explicitly.
 * Quote creation must not read, reserve, debit, credit, or mutate balances.
-* Quotes must store executable terms: rate, route, spread, amounts, expiry, and `rate_snapshot_id`.
+* Quotes must store executable terms: rate, route, total spread bps, amounts, and expiry. Per-leg pricing detail (mid, executable rate, spread side/bps, snapshot id) is stored in `quote_legs`. `quote_legs` rows are never updated.
 * Execute must use stored quote terms and never recompute rates.
 * Debit, credit, execution row, and completed idempotency result must commit together.
 * The same quote can execute exactly once.

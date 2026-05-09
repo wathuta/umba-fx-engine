@@ -136,9 +136,39 @@ class Quote(Base):
     executable_rate: Mapped[Decimal] = mapped_column(Numeric(NUMERIC_PRECISION, RATE_SCALE), nullable=False)
     route: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
     spread_bps: Mapped[int] = mapped_column(Integer, nullable=False)
-    rate_snapshot_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("rate_snapshots.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class QuoteLeg(Base):
+    """Per-leg pricing for quote audit. Rows are never updated.
+
+    One row per leg in route order, saved in the same transaction as the
+    parent `Quote`. Stores the math at the time the quote was made so we can
+    rebuild a quote later even if `current_rates` has changed.
+    """
+
+    __tablename__ = "quote_legs"
+    __table_args__ = (
+        UniqueConstraint("quote_id", "position", name="uq_quote_legs_quote_position"),
+    )
+
+    id = uuid_pk()
+    quote_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("quotes.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_currency: Mapped[str] = mapped_column(String(CURRENCY_CODE_LENGTH), nullable=False)
+    destination_currency: Mapped[str] = mapped_column(String(CURRENCY_CODE_LENGTH), nullable=False)
+    mid_rate: Mapped[Decimal] = mapped_column(Numeric(NUMERIC_PRECISION, RATE_SCALE), nullable=False)
+    executable_rate: Mapped[Decimal] = mapped_column(Numeric(NUMERIC_PRECISION, RATE_SCALE), nullable=False)
+    spread_side: Mapped[str] = mapped_column(String(8), nullable=False)
+    spread_bps: Mapped[int] = mapped_column(Integer, nullable=False)
+    rate_snapshot_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("rate_snapshots.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Execution(Base):

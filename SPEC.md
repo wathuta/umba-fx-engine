@@ -23,7 +23,8 @@ Build a FastAPI + Postgres FX engine for USD, EUR, KES, and NGN with customer ba
 - `rate_refreshes`: provider refresh attempt with status, timestamps, counts, latency, and error fields.
 - `rate_snapshots`: immutable provider rates with `rate_refresh_id`, canonical pair, `mid_rate`, provider timestamp, fetched time, raw payload hash; indexed by `(base_currency, quote_currency, fetched_at desc)`.
 - `current_rates`: latest usable canonical pair with `mid_rate`, `buy_spread_bps`, `sell_spread_bps`, `rate_snapshot_id`, `last_updated_at`; unique `(base_currency, quote_currency)`.
-- `quotes`: immutable terms with customer, currencies, source/destination amounts, executable rate, route, compounded spread, `rate_snapshot_id`, `created_at`, and `expires_at`.
+- `quotes`: immutable terms with customer, currencies, source/destination amounts, executable rate, route, total spread bps, `created_at`, and `expires_at`. Provenance lives in `quote_legs`.
+- `quote_legs`: per-leg pricing with `quote_id`, `position`, source/destination currencies, `mid_rate`, `executable_rate`, `spread_side`, `spread_bps`, and `rate_snapshot_id`; unique `(quote_id, position)`. Rows are never updated. Stores the math at the time the quote was made so we can rebuild a quote later even if `current_rates` has changed.
 - `executions`: successful execution rows with debit leg, credit leg, customer, quote, and timestamp; unique `quote_id`.
 - `idempotency_keys`: execute idempotency record with endpoint, key, request hash, response payload/status, and completion timestamp; unique `(endpoint, key)`.
 
@@ -63,8 +64,8 @@ Build a FastAPI + Postgres FX engine for USD, EUR, KES, and NGN with customer ba
 - `source_amount > 0`.
 - `created_at = now`.
 - `expires_at = created_at + 60 seconds`.
-- Quote records `rate_snapshot_id`, executable rate, route, spread, source amount, destination amount, and expiry.
-- Quote terms are immutable.
+- Quote records executable rate, route, total spread bps, source amount, destination amount, and expiry. Per-leg pricing detail (mid rate, executable rate, spread side/bps, snapshot id) is stored in `quote_legs`; rebuild a quote's provenance from there.
+- Quote and quote_leg rows are never updated after they are written.
 - Quote creation never reads, reserves, debits, credits, or mutates balances.
 - Execution uses stored quote terms and never recomputes rates.
 
@@ -79,7 +80,7 @@ Build a FastAPI + Postgres FX engine for USD, EUR, KES, and NGN with customer ba
 - If refresh fails, the failed attempt is recorded in `rate_refreshes`.
 - Failed refresh attempts do not update `current_rates`.
 - Successful refresh updates `current_rates.last_updated_at`.
-- Quotes read `current_rates`, verify freshness, and store `rate_snapshot_id`; normal quote creation does not read `rate_snapshots`.
+- Quotes read `current_rates`, verify freshness, and store each leg's `rate_snapshot_id` on the matching `quote_legs` row; normal quote creation does not read `rate_snapshots`.
 
 ## 8. Rate Direction And Spread Rules
 Canonical pair:
