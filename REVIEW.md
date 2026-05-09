@@ -1,10 +1,10 @@
 # Planted-Bug Review
 
-I went through `planted_bugs/` the way I'd review a teammate's PR — skim, then read carefully, then run the tests. The 9 tests pass. They also don't exercise any of the actual problems, which is its own finding. Findings below are ordered by what I'd block the merge on first.
+I went through `planted_bugs` the way I'd review a teammate's PR — skim, then read carefully, then run the tests. The 9 tests pass. They also don't exercise any of the actual problems, which is its own finding. Findings below are ordered by what I'd block the merge on first.
 
 The short version: this implementation never moves money, lets the same quote execute twice, recomputes rates at settlement, and prices in the wrong direction. The pricing direction alone would cost the desk on every direct trade. None of these are subtle once you sit with the code.
 
-I read `fx.py`, `app.py`, `db.py`, `rates.py`, and `tests/test_fx.py`, and ran `pytest` once inside `planted_bugs/` to confirm the suite is green. No load test, no multi-process run — the concurrency evidence in finding 4 is structural, not observed.
+I read `fx.py`, `app.py`, `db.py`, `rates.py`, and `tests/test_fx.py`, and ran `pytest` once inside `planted_bugs` to confirm the suite is green. No load test, no multi-process run — the concurrency evidence in finding 4 is structural, not observed.
 
 ## Findings at a glance
 
