@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.core.constants import DECIMAL_ONE, ERROR_RATES_STALE, OUTCOME_SUCCESS
 from app.core.errors import service_unavailable, validation_error
 from app.core.money import Currency, round_money, round_rate
-from app.core.observability import log_event, quote_created_total
+from app.core.observability import log_event, quote_created_total, quote_latency_ms
 from app.db.models import CurrentRate, Quote, QuoteLeg
 from app.services.customers import assert_customer_exists
 from app.services.rates import ensure_fresh_rates
@@ -34,7 +34,12 @@ SPREAD_SIDE_SELL = "sell"
 
 @dataclass(frozen=True)
 class LegPricing:
-    """`mid_rate` keeps all decimals; `executable_rate` is rounded per leg so stored quote amounts don't change."""
+    """In-memory pricing for one leg.
+
+    `mid_rate` keeps all decimals. `executable_rate` is rounded per leg so an
+    auditor multiplying stored `QuoteLeg.executable_rate` values reproduces
+    the `Quote.executable_rate` written to the parent.
+    """
 
     source: Currency
     destination: Currency
@@ -85,6 +90,7 @@ def price_leg(rate: CurrentRate, source: Currency, destination: Currency) -> Leg
     raise validation_error("Rate direction does not match requested leg.")
 
 
+@quote_latency_ms.time()
 def create_quote(
     session: Session,
     customer_id: UUID,

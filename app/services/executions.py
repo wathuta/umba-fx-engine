@@ -20,6 +20,7 @@ from app.core.errors import conflict, not_found
 from app.core.money import Currency, round_money
 from app.core.observability import (
     execution_failure_total,
+    execution_latency_ms,
     execution_success_total,
     idempotency_conflict_total,
     idempotency_replay_total,
@@ -53,6 +54,7 @@ def _execution_response(execution: Execution, balances: dict[Currency, Decimal])
     }
 
 
+@execution_latency_ms.time()
 def execute_quote(
     session: Session,
     quote_id: UUID,

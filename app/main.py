@@ -16,6 +16,8 @@ from app.core.errors import (
     unhandled_error_handler,
     validation_error,
 )
+from prometheus_fastapi_instrumentator import Instrumentator
+
 from app.core.observability import RequestIdMiddleware
 from app.db.session import create_all
 
@@ -37,6 +39,7 @@ def create_app() -> FastAPI:
         return problem_response(error, getattr(request.state, "request_id", None))
 
     app.include_router(router)
+    Instrumentator().instrument(app)
     return app
 
 
