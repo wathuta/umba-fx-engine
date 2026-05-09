@@ -45,7 +45,9 @@ Build a FastAPI + Postgres FX engine for USD, EUR, KES, and NGN with customer ba
   - Input: empty body for default refresh.
   - Output: `rate_refresh_id`, `status`, `fetched_at`, `pairs_updated`.
 - `GET /healthz`
-  - Output: app health, DB connectivity, and rate freshness.
+  - Output: process liveness.
+- `GET /readyz`
+  - Output: database connectivity and rate freshness readiness for quote traffic.
 - `GET /metrics`
   - Output: quote, execution, idempotency, stale-rate, and rate-refresh metrics.
 
@@ -205,7 +207,7 @@ Required machine codes:
 - Idempotency tests: same payload replays, different payload returns `409`, replay does not mutate balances.
 - Atomicity tests: insufficient funds and injected mid-execute failure leave persisted state unchanged.
 - Rate-source tests: fresh cached rates, stale rates, down provider, slow provider, bad provider response.
-- Observability tests: `/healthz` reports DB/rate freshness and `/metrics` exposes required counters.
+- Observability tests: `/healthz` reports liveness, `/readyz` reports DB/rate readiness, and `/metrics` exposes required counters.
 
 ## 16. Out of Scope
 - Auth/authz.

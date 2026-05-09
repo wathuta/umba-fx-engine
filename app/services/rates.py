@@ -84,11 +84,7 @@ class RateProvider:
             raise bad_gateway(ERROR_UPSTREAM_BAD_RESPONSE, "Rate provider returned an unusable response.")
         try:
             base_currency = Currency(payload.get("base", Currency.USD.value))
-            rates = {
-                Currency(k): Decimal(str(v))
-                for k, v in payload["rates"].items()
-                if k in Currency.__members__
-            }
+            rates = {Currency(k): Decimal(str(v)) for k, v in payload["rates"].items() if k in Currency.__members__}
             provider_timestamp = _provider_timestamp(payload.get("timestamp"))
         except (ValueError, DecimalException, TypeError) as exc:
             raise bad_gateway(ERROR_UPSTREAM_BAD_RESPONSE, "Rate provider returned invalid rate data.") from exc
@@ -198,19 +194,28 @@ def refresh_rates(
 
 def ensure_fresh_rates(session: Session) -> None:
     """Fail quotes when the latest current rate is outside the freshness window."""
+    status = rates_freshness_status(session)
+    if status == "fresh":
+        return
+    stale_rates_total.inc()
+    detail = "Rates are unavailable." if status == "unavailable" else "Rates are stale."
+    raise service_unavailable(ERROR_RATES_STALE, detail)
+
+
+def rates_freshness_status(session: Session) -> str:
+    """Return rate readiness without mutating quote-path metrics."""
     latest = session.execute(
         select(CurrentRate).order_by(CurrentRate.last_updated_at.desc()).limit(1)
     ).scalar_one_or_none()
     if latest is None:
-        stale_rates_total.inc()
-        raise service_unavailable(ERROR_RATES_STALE, "Rates are unavailable.")
+        return "unavailable"
     cutoff = datetime.now(UTC) - timedelta(seconds=get_settings().rate_freshness_seconds)
     last_updated = latest.last_updated_at
     if last_updated.tzinfo is None:
         last_updated = last_updated.replace(tzinfo=UTC)
     if last_updated < cutoff:
-        stale_rates_total.inc()
-        raise service_unavailable(ERROR_RATES_STALE, "Rates are stale.")
+        return "stale"
+    return "fresh"
 
 
 def _duration_ms(started: datetime) -> int:

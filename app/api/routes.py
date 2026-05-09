@@ -18,14 +18,13 @@ from app.api.schemas import (
     ReadinessResponse,
 )
 from app.core.constants import EXECUTIONS_PATH, HTTP_POST
-from app.core.errors import ApiError
 from app.core.money import Currency
 from app.core.observability import metrics_response
 from app.db.session import get_db
 from app.services.customers import create_customer, credit_balance, get_balances
 from app.services.executions import execute_quote, request_hash
 from app.services.quotes import create_quote
-from app.services.rates import ensure_fresh_rates, refresh_rates
+from app.services.rates import rates_freshness_status, refresh_rates
 
 router = APIRouter()
 
@@ -109,19 +108,9 @@ def refresh_rates_endpoint(request: Request, session: Session = Depends(get_db))
 
 
 @router.get("/healthz", response_model=HealthResponse)
-def healthz(session: Session = Depends(get_db)) -> HealthResponse:
-    """Report process health while exposing DB and rate freshness details."""
-    db_status = "ok"
-    rates_status = "ok"
-    try:
-        session.execute(text("SELECT 1"))
-    except Exception:
-        db_status = "unhealthy"
-    try:
-        ensure_fresh_rates(session)
-    except ApiError:
-        rates_status = "stale"
-    return HealthResponse(status=db_status, database=db_status, rates=rates_status)
+def healthz() -> HealthResponse:
+    """Report process liveness only."""
+    return HealthResponse(status="ok")
 
 
 @router.get("/readyz", response_model=ReadinessResponse)
@@ -130,12 +119,11 @@ def readyz(session: Session = Depends(get_db)) -> ReadinessResponse:
     try:
         session.execute(text("SELECT 1"))
     except Exception:
-        return ReadinessResponse(status="unhealthy", database="unhealthy", rates="unknown")
-    try:
-        ensure_fresh_rates(session)
-    except ApiError:
-        return ReadinessResponse(status="unhealthy", database="ok", rates="stale")
-    return ReadinessResponse(status="ok", database="ok", rates="ok")
+        return ReadinessResponse(status="not_ready", database="unhealthy", rates="unknown")
+    rates_status = rates_freshness_status(session)
+    if rates_status != "fresh":
+        return ReadinessResponse(status="not_ready", database="ok", rates=rates_status)
+    return ReadinessResponse(status="ready", database="ok", rates="fresh")
 
 
 @router.get("/metrics")

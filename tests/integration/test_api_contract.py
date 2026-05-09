@@ -222,12 +222,10 @@ def test_health_and_ready_show_stale_rates(client):
     health = client.get("/healthz")
     readiness = client.get("/readyz")
 
-    # Health is liveness-style; readiness is stricter because quotes require
-    # fresh rates.
     assert health.status_code == 200
-    assert health.json() == {"status": "ok", "database": "ok", "rates": "stale"}
+    assert health.json() == {"status": "ok"}
     assert readiness.status_code == 200
-    assert readiness.json() == {"status": "unhealthy", "database": "ok", "rates": "stale"}
+    assert readiness.json() == {"status": "not_ready", "database": "ok", "rates": "unavailable"}
 
 
 def test_metrics_endpoint_exposes_prometheus_metrics(client):

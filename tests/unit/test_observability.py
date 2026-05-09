@@ -9,9 +9,9 @@ def test_healthz_and_metrics(client, seeded_rates):
     metrics = client.get("/metrics")
 
     assert health.status_code == 200
-    assert health.json()["database"] == "ok"
+    assert health.json() == {"status": "ok"}
     assert readiness.status_code == 200
-    assert readiness.json() == {"status": "ok", "database": "ok", "rates": "ok"}
+    assert readiness.json() == {"status": "ready", "database": "ok", "rates": "fresh"}
     assert metrics.status_code == 200
     for counter in (
         "fx_quote_created_total",
@@ -29,4 +29,4 @@ def test_readyz_reports_unhealthy_when_rates_are_stale(client, db_session):
     response = client.get("/readyz")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "unhealthy", "database": "ok", "rates": "stale"}
+    assert response.json() == {"status": "not_ready", "database": "ok", "rates": "stale"}
