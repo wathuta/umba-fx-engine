@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -35,7 +36,11 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
-        error = bad_request("Malformed JSON body.") if _is_json_decode_error(exc) else validation_error(str(exc))
+        error = (
+            bad_request("Malformed JSON body.")
+            if _is_json_decode_error(exc)
+            else validation_error("Request validation failed.", _safe_validation_errors(exc))
+        )
         return problem_response(error, getattr(request.state, "request_id", None))
 
     app.include_router(router)
@@ -48,3 +53,18 @@ app = create_app()
 
 def _is_json_decode_error(exc: RequestValidationError) -> bool:
     return any("json" in str(error.get("type", "")).lower() for error in exc.errors())
+
+
+def _safe_validation_errors(exc: RequestValidationError) -> list[dict[str, Any]]:
+    return [
+        {
+            "field": _field_path(error.get("loc", ())),
+            "message": str(error.get("msg", "Invalid value.")),
+        }
+        for error in exc.errors()
+    ]
+
+
+def _field_path(location: Any) -> str:
+    parts = [str(part) for part in location if part != "body"]
+    return ".".join(parts) if parts else "body"

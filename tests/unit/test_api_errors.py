@@ -24,6 +24,29 @@ def test_money_inputs_must_be_decimal_strings(client, seeded_rates):
     assert quote.status_code == 422
 
 
+def test_validation_error_is_sanitized(client):
+    customer_id = client.post("/customers").json()["customer_id"]
+
+    response = client.post(
+        f"/customers/{customer_id}/balance-credits",
+        json={"currency": "GBP", "amount": "10.00"},
+        headers={"X-Request-ID": "validation-sanitized-test"},
+    )
+    body = response.json()
+
+    assert response.status_code == 422
+    assert body["detail"] == "Request validation failed."
+    assert body["instance"] == "urn:request:validation-sanitized-test"
+    assert body["errors"] == [
+        {
+            "field": "currency",
+            "message": "Input should be 'USD', 'EUR', 'KES' or 'NGN'",
+        }
+    ]
+    assert "routes.py" not in body["detail"]
+    assert "/home/" not in body["detail"]
+
+
 def test_errors_use_problem_json(client):
     response = client.post("/quotes", content='{"bad"', headers={"Content-Type": "application/json"})
 
@@ -46,7 +69,7 @@ def test_unsupported_content_type_rejected(client):
         (gateway_timeout("Rate provider timed out."), 504, "upstream_timeout"),
     ],
 )
-def test_rate_refresh_endpoint_maps_provider_failures(
+def test_rate_refresh_maps_provider_errors(
     client,
     monkeypatch,
     provider_error,

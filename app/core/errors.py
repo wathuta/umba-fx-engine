@@ -25,6 +25,7 @@ class ApiError(Exception):
     title: str
     detail: str
     retryable: bool = False
+    errors: list[dict[str, Any]] | None = None
 
 
 def problem_response(error: ApiError, request_id: str | None = None) -> JSONResponse:
@@ -38,6 +39,8 @@ def problem_response(error: ApiError, request_id: str | None = None) -> JSONResp
         "code": error.code,
         "retryable": error.retryable,
     }
+    if error.errors:
+        payload["errors"] = error.errors
     return JSONResponse(status_code=error.status_code, content=payload, media_type=CONTENT_TYPE_PROBLEM_JSON)
 
 
@@ -77,8 +80,14 @@ def bad_request(detail: str) -> ApiError:
     return ApiError(status.HTTP_400_BAD_REQUEST, "bad_request", "Bad request", detail)
 
 
-def validation_error(detail: str) -> ApiError:
-    return ApiError(status.HTTP_422_UNPROCESSABLE_CONTENT, "validation_error", "Validation error", detail)
+def validation_error(detail: str, errors: list[dict[str, Any]] | None = None) -> ApiError:
+    return ApiError(
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
+        "validation_error",
+        "Validation error",
+        detail,
+        errors=errors,
+    )
 
 
 def unsupported_media_type(detail: str) -> ApiError:
