@@ -30,13 +30,11 @@ from app.core.observability import (
 from app.db.models import Execution, IdempotencyKey, Quote
 from app.repositories.balances import get_balance
 
-# Execution conflict code and log event name.
+# Execution conflict code — used across four raise sites in this file.
 ERROR_IDEMPOTENCY_CONFLICT = "idempotency_conflict"
-EVENT_EXECUTION_COMPLETED = "execution.completed"
 
-# Response field names for execution debit/credit legs.
-FIELD_AMOUNT = "amount"
-FIELD_CURRENCY = "currency"
+# Endpoint identifier stored on every idempotency row; must match routes.py.
+_EXECUTIONS_ENDPOINT = f"{HTTP_POST} {EXECUTIONS_PATH}"
 
 
 def request_hash(method: str, path: str, body: dict) -> str:
@@ -49,8 +47,8 @@ def _execution_response(execution: Execution, balances: dict[Currency, Decimal])
     return {
         "execution_id": str(execution.id),
         "quote_id": str(execution.quote_id),
-        "debit": {FIELD_CURRENCY: execution.debit_currency, FIELD_AMOUNT: str(execution.debit_amount)},
-        "credit": {FIELD_CURRENCY: execution.credit_currency, FIELD_AMOUNT: str(execution.credit_amount)},
+        "debit": {"currency": execution.debit_currency, "amount": str(execution.debit_amount)},
+        "credit": {"currency": execution.credit_currency, "amount": str(execution.credit_amount)},
         "balances": {currency.value: str(amount) for currency, amount in balances.items()},
     }
 
@@ -68,7 +66,7 @@ def execute_quote(
         raise conflict(ERROR_IDEMPOTENCY_CONFLICT, "Idempotency-Key is required.")
     existing_key = session.execute(
         select(IdempotencyKey).where(
-            IdempotencyKey.endpoint == f"{HTTP_POST} {EXECUTIONS_PATH}",
+            IdempotencyKey.endpoint == _EXECUTIONS_ENDPOINT,
             IdempotencyKey.key == idempotency_key,
         )
     ).scalar_one_or_none()
@@ -85,7 +83,7 @@ def execute_quote(
         idempotency_conflict_total.inc()
         raise conflict(ERROR_IDEMPOTENCY_CONFLICT, "Idempotency-Key is already in flight.")
 
-    idem = IdempotencyKey(endpoint=f"{HTTP_POST} {EXECUTIONS_PATH}", key=idempotency_key, request_hash=req_hash)
+    idem = IdempotencyKey(endpoint=_EXECUTIONS_ENDPOINT, key=idempotency_key, request_hash=req_hash)
     try:
         session.add(idem)
         session.flush()
@@ -156,7 +154,7 @@ def execute_quote(
         session.commit()
         execution_success_total.inc()
         log_event(
-            EVENT_EXECUTION_COMPLETED,
+            "execution.completed",
             request_id=request_id,
             customer_id=quote.customer_id,
             quote_id=quote.id,

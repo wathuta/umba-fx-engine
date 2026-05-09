@@ -15,10 +15,6 @@ from app.core.errors import problem_response, unsupported_media_type
 logger = logging.getLogger("fx")
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-# Media types for JSON requests and Prometheus metrics.
-CONTENT_TYPE_JSON = "application/json"
-CONTENT_TYPE_PROMETHEUS = "text/plain; version=0.0.4"
-
 # Request IDs are propagated through responses, errors, and structured logs.
 HEADER_REQUEST_ID = "X-Request-ID"
 
@@ -57,7 +53,7 @@ def _has_unsupported_json_content(request: Request) -> bool:
     if request.headers.get("content-length") in {None, "0"}:
         return False
     content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
-    return content_type != CONTENT_TYPE_JSON
+    return content_type != "application/json"
 
 
 def log_event(event: str, **fields: object) -> None:
@@ -67,7 +63,7 @@ def log_event(event: str, **fields: object) -> None:
 
 
 def metrics_response() -> Response:
-    return Response(generate_latest(), media_type=CONTENT_TYPE_PROMETHEUS)
+    return Response(generate_latest(), media_type="text/plain; version=0.0.4")
 
 
 def now_ms() -> float:

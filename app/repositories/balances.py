@@ -7,14 +7,14 @@ from sqlalchemy.orm import Session
 
 from app.core.constants import ZERO_MONEY
 from app.core.money import Currency, round_money
-from app.db.models import Balance
+from app.db.models import Balance, UQ_BALANCES_CUSTOMER_CURRENCY
 
 
 def ensure_balance(session: Session, customer_id: UUID, currency: Currency) -> Balance:
     stmt = (
         insert(Balance)
         .values(customer_id=customer_id, currency=currency.value, balance=ZERO_MONEY)
-        .on_conflict_do_nothing(index_elements=["customer_id", "currency"])
+        .on_conflict_do_nothing(constraint=UQ_BALANCES_CUSTOMER_CURRENCY)
     )
     session.execute(stmt)
     session.flush()

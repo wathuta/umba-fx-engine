@@ -28,28 +28,17 @@ from app.core.observability import (
     rate_refresh_success_total,
     stale_rates_total,
 )
-from app.db.models import CurrentRate, RateRefresh, RateSnapshot
+from app.db.models import CurrentRate, RateRefresh, RateSnapshot, UQ_CURRENT_RATES_PAIR
 
 # Upstream failures from the provider are normalized to this client-facing code.
 ERROR_UPSTREAM_BAD_RESPONSE = "upstream_bad_response"
 
-# Event names used in refresh logs.
-EVENT_RATE_REFRESH_COMPLETED = "rate_refresh.completed"
-EVENT_RATE_REFRESH_FAILED = "rate_refresh.failed"
-
-# Provider payload constants document the selected upstream shape.
+# Provider name stored on refresh/snapshot rows.
 PROVIDER_FXAPI_APP = "fxapi.app"
-PROVIDER_RATES_KEY = "rates"
 
 # Status values stored on refresh rows.
 STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
-
-# Refresh attempts begin with no updated pairs until snapshots are written.
-INITIAL_PAIRS_UPDATED = 0
-
-# Freshness checks only need the newest current-rate timestamp.
-LATEST_RATE_LIMIT = 1
 
 # Stored rate directions; inverses are calculated in code.
 CANONICAL_PAIRS: tuple[tuple[Currency, Currency], ...] = (
@@ -91,13 +80,13 @@ class RateProvider:
             raise bad_gateway(ERROR_UPSTREAM_BAD_RESPONSE, "Rate provider returned invalid JSON.") from exc
         if response.status_code >= 400:
             raise bad_gateway(ERROR_UPSTREAM_BAD_RESPONSE, "Rate provider returned an HTTP error.")
-        if payload.get("success") is False or PROVIDER_RATES_KEY not in payload:
+        if payload.get("success") is False or "rates" not in payload:
             raise bad_gateway(ERROR_UPSTREAM_BAD_RESPONSE, "Rate provider returned an unusable response.")
         try:
             base_currency = Currency(payload.get("base", Currency.USD.value))
             rates = {
                 Currency(k): Decimal(str(v))
-                for k, v in payload[PROVIDER_RATES_KEY].items()
+                for k, v in payload["rates"].items()
                 if k in Currency.__members__
             }
             provider_timestamp = _provider_timestamp(payload.get("timestamp"))
@@ -139,7 +128,7 @@ def refresh_rates(
             provider_base_currency=rates.base_currency.value,
             provider_timestamp=rates.provider_timestamp,
             fetched_at=started,
-            pairs_updated=INITIAL_PAIRS_UPDATED,
+            pairs_updated=0,
             duration_ms=_duration_ms(started),
         )
         session.add(refresh)
@@ -171,7 +160,7 @@ def refresh_rates(
                     last_updated_at=started,
                 )
                 .on_conflict_do_update(
-                    constraint="uq_current_rates_pair",
+                    constraint=UQ_CURRENT_RATES_PAIR,
                     set_={
                         "mid_rate": mid_rate,
                         "buy_spread_bps": settings.default_buy_spread_bps,
@@ -188,7 +177,7 @@ def refresh_rates(
         rate_refresh_success_total.inc()
         rate_refresh_latency_ms.observe(refresh.duration_ms)
         log_event(
-            EVENT_RATE_REFRESH_COMPLETED,
+            "rate_refresh.completed",
             request_id=request_id,
             rate_refresh_id=refresh.id,
             provider=rates.provider,
@@ -209,7 +198,7 @@ def refresh_rates(
 def ensure_fresh_rates(session: Session) -> None:
     """Fail quotes when the latest current rate is outside the freshness window."""
     latest = session.execute(
-        select(CurrentRate).order_by(CurrentRate.last_updated_at.desc()).limit(LATEST_RATE_LIMIT)
+        select(CurrentRate).order_by(CurrentRate.last_updated_at.desc()).limit(1)
     ).scalar_one_or_none()
     if latest is None:
         stale_rates_total.inc()
@@ -245,7 +234,7 @@ def _record_failed_refresh(session: Session, started: datetime, error: ApiError,
         provider_base_currency=None,
         provider_timestamp=None,
         fetched_at=started,
-        pairs_updated=INITIAL_PAIRS_UPDATED,
+        pairs_updated=0,
         error_code=error.code,
         error_message=error.detail,
         duration_ms=_duration_ms(started),
@@ -255,12 +244,12 @@ def _record_failed_refresh(session: Session, started: datetime, error: ApiError,
     rate_refresh_failure_total.inc()
     rate_refresh_latency_ms.observe(refresh.duration_ms)
     log_event(
-        EVENT_RATE_REFRESH_FAILED,
+        "rate_refresh.failed",
         request_id=request_id,
         rate_refresh_id=refresh.id,
         provider=refresh.provider,
         status=STATUS_FAILED,
-        pairs_updated=INITIAL_PAIRS_UPDATED,
+        pairs_updated=0,
         duration_ms=refresh.duration_ms,
         error_code=error.code,
     )

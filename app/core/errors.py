@@ -17,13 +17,6 @@ logger = logging.getLogger("fx")
 # Error responses use the same problem+json media type everywhere.
 CONTENT_TYPE_PROBLEM_JSON = "application/problem+json"
 
-# Upstream timeout code is produced only by this error factory.
-ERROR_UPSTREAM_TIMEOUT = "upstream_timeout"
-
-# Unexpected error logs include the request ID for debugging.
-EVENT_UNHANDLED_ERROR = "unhandled_error"
-FIELD_REQUEST_ID = "request_id"
-
 
 @dataclass(slots=True)
 class ApiError(Exception):
@@ -49,22 +42,22 @@ def problem_response(error: ApiError, request_id: str | None = None) -> JSONResp
 
 
 async def api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
-    return problem_response(exc, getattr(request.state, FIELD_REQUEST_ID, None))
+    return problem_response(exc, getattr(request.state, "request_id", None))
 
 
 async def http_error_handler(request: Request, exc: HTTPException) -> JSONResponse:
     title = exc.detail if isinstance(exc.detail, str) else "HTTP error"
     return problem_response(
         ApiError(exc.status_code, "http_error", title, str(exc.detail)),
-        getattr(request.state, FIELD_REQUEST_ID, None),
+        getattr(request.state, "request_id", None),
     )
 
 
 async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
-    request_id = getattr(request.state, FIELD_REQUEST_ID, None)
+    request_id = getattr(request.state, "request_id", None)
     logger.exception(
         json.dumps(
-            {"event": EVENT_UNHANDLED_ERROR, "error_type": type(exc).__name__, FIELD_REQUEST_ID: request_id},
+            {"event": "unhandled_error", "error_type": type(exc).__name__, "request_id": request_id},
             default=str,
             sort_keys=True,
         )
@@ -114,4 +107,4 @@ def bad_gateway(code: str, detail: str, retryable: bool = True) -> ApiError:
 
 
 def gateway_timeout(detail: str) -> ApiError:
-    return ApiError(status.HTTP_504_GATEWAY_TIMEOUT, ERROR_UPSTREAM_TIMEOUT, "Upstream timeout", detail, retryable=True)
+    return ApiError(status.HTTP_504_GATEWAY_TIMEOUT, "upstream_timeout", "Upstream timeout", detail, retryable=True)

@@ -29,15 +29,6 @@ from app.services.rates import ensure_fresh_rates, refresh_rates
 
 router = APIRouter()
 
-# Health probes use the smallest DB query that proves connectivity.
-SQL_SELECT_ONE = "SELECT 1"
-
-# Health/readiness response values.
-STATUS_OK = "ok"
-STATUS_UNHEALTHY = "unhealthy"
-STATUS_STALE = "stale"
-STATUS_UNKNOWN = "unknown"
-
 
 @router.post("/customers", response_model=CustomerResponse, status_code=status.HTTP_201_CREATED)
 def create_customer_endpoint(session: Session = Depends(get_db)) -> CustomerResponse:
@@ -120,35 +111,31 @@ def refresh_rates_endpoint(request: Request, session: Session = Depends(get_db))
 @router.get("/healthz", response_model=HealthResponse)
 def healthz(session: Session = Depends(get_db)) -> HealthResponse:
     """Report process health while exposing DB and rate freshness details."""
-    db_status = STATUS_OK
-    rates_status = STATUS_OK
+    db_status = "ok"
+    rates_status = "ok"
     try:
-        session.execute(text(SQL_SELECT_ONE))
+        session.execute(text("SELECT 1"))
     except Exception:
-        db_status = STATUS_UNHEALTHY
+        db_status = "unhealthy"
     try:
         ensure_fresh_rates(session)
     except ApiError:
-        rates_status = STATUS_STALE
-    return HealthResponse(
-        status=STATUS_OK if db_status == STATUS_OK else STATUS_UNHEALTHY,
-        database=db_status,
-        rates=rates_status,
-    )
+        rates_status = "stale"
+    return HealthResponse(status=db_status, database=db_status, rates=rates_status)
 
 
 @router.get("/readyz", response_model=ReadinessResponse)
 def readyz(session: Session = Depends(get_db)) -> ReadinessResponse:
     """Report readiness for quote traffic; stale rates make the service not ready."""
     try:
-        session.execute(text(SQL_SELECT_ONE))
+        session.execute(text("SELECT 1"))
     except Exception:
-        return ReadinessResponse(status=STATUS_UNHEALTHY, database=STATUS_UNHEALTHY, rates=STATUS_UNKNOWN)
+        return ReadinessResponse(status="unhealthy", database="unhealthy", rates="unknown")
     try:
         ensure_fresh_rates(session)
     except ApiError:
-        return ReadinessResponse(status=STATUS_UNHEALTHY, database=STATUS_OK, rates=STATUS_STALE)
-    return ReadinessResponse(status=STATUS_OK, database=STATUS_OK, rates=STATUS_OK)
+        return ReadinessResponse(status="unhealthy", database="ok", rates="stale")
+    return ReadinessResponse(status="ok", database="ok", rates="ok")
 
 
 @router.get("/metrics")

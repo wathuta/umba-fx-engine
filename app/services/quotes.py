@@ -5,7 +5,6 @@ stored terms rather than repricing, so later rate changes do not alter the
 accepted quote.
 """
 
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
@@ -24,23 +23,8 @@ from app.services.rates import ensure_fresh_rates
 # Spread math uses basis points, where 10,000 bps equals 100%.
 BASIS_POINT_DENOMINATOR = Decimal("10000")
 
-# Event name used in quote logs.
-EVENT_QUOTE_CREATED = "quote.created"
-
 # Quote validity window.
 QUOTE_TTL_SECONDS = 60
-
-
-@dataclass(frozen=True)
-class Leg:
-    base: Currency
-    quote: Currency
-    source: Currency
-    destination: Currency
-    mid_rate: Decimal
-    buy_spread_bps: int
-    sell_spread_bps: int
-    rate_snapshot_id: UUID
 
 
 def find_current_rate(session: Session, source: Currency, destination: Currency) -> CurrentRate | None:
@@ -127,7 +111,7 @@ def create_quote(
     session.commit()
     quote_created_total.inc()
     log_event(
-        EVENT_QUOTE_CREATED,
+        "quote.created",
         request_id=request_id,
         customer_id=customer_id,
         quote_id=quote.id,
