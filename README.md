@@ -209,3 +209,27 @@ Run the command locally to see the current test count.
 
 ## Time Tracking
 
+I'm currently working a full-time role, so this was done across evenings and
+breaks with quite a bit of context switching between tasks.
+
+**Active-engagement time:** ~11 hours.
+**Wall-clock span:** 07 May 2026 – 09 May 2026 (3 calendar days).
+
+### 07 May 2026
+
+- 11:25 AM – 12:10 PM — read the assignment and requirements
+- *Break — unrelated tasks*
+- 12:35 PM – 12:55 PM — finish reading requirements, take personal notes
+- 1:00 PM – 1:22 PM — first pass on `SPEC.md`
+- *Break — unrelated tasks*
+- 3:19 PM – 4:20 PM — `SPEC.md` refinement
+- 7:30 PM – 9:00 PM — `AGENTS.md` creation and initial code generation
+
+### 08 May 2026
+
+- 3:10 PM – 4:30 PM — generated code review and code updates
+- 7:30 PM – 9:00 PM — code review and updates
+
+### 09 May 2026
+
+- 8:00 AM – 11:26 AM — code review and manual testing
