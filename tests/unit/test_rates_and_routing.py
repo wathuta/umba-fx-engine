@@ -7,7 +7,7 @@ from sqlalchemy import delete, func, select
 from app.core.errors import ApiError, bad_gateway, gateway_timeout
 from app.core.money import Currency, round_money, round_rate
 from app.db.models import CurrentRate, Quote, RateRefresh
-from app.services.rates import CANONICAL_PAIRS, ProviderRates, refresh_rates
+from app.services.rates import CANONICAL_PAIRS, ProviderRates, RateProvider, refresh_rates
 from tests.conftest import seed_rates
 from tests.unit.helpers import create_customer_with_usd
 
@@ -45,6 +45,31 @@ class IncompleteProvider:
             provider_timestamp=datetime.now(UTC),
             raw_payload={"base": "USD", "rates": {"KES": "130"}},
         )
+
+
+def test_fxapi_provider_payload_is_parsed(monkeypatch):
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return {
+                "base": "USD",
+                "timestamp": "2026-05-08T17:05:11.556Z",
+                "rates": {
+                    "EUR": 0.849449,
+                    "KES": 129.149265,
+                    "NGN": 1363.267265,
+                },
+            }
+
+    monkeypatch.setattr("app.services.rates.httpx.get", lambda *args, **kwargs: Response())
+
+    rates = RateProvider().fetch()
+
+    assert rates.provider == "fxapi.app"
+    assert rates.base_currency == Currency.USD
+    assert rates.rates[Currency.KES] == Decimal("129.149265")
+    assert rates.provider_timestamp is not None
 
 
 def test_refresh_rates_writes_one_canonical_orientation_per_pair(db_session):
