@@ -2,7 +2,6 @@
 
 import json
 import logging
-import time
 from collections.abc import Callable
 from uuid import uuid4
 
@@ -56,15 +55,11 @@ def _has_unsupported_json_content(request: Request) -> bool:
     return content_type != "application/json"
 
 
-def log_event(event: str, **fields: object) -> None:
+def log_event(event: str, level: int = logging.INFO, **fields: object) -> None:
     """Emit JSON logs so quote and execution events can be correlated."""
     payload = {"event": event, **fields}
-    logger.info(json.dumps(payload, default=str, sort_keys=True))
+    logger.log(level, json.dumps(payload, default=str, sort_keys=True))
 
 
 def metrics_response() -> Response:
     return Response(generate_latest(), media_type="text/plain; version=0.0.4")
-
-
-def now_ms() -> float:
-    return time.perf_counter() * 1000

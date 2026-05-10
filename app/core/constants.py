@@ -8,6 +8,7 @@ EXECUTIONS_PATH = "/executions"
 
 # Shared outcome strings prevent quote and execution logs from drifting.
 OUTCOME_SUCCESS = "success"
+OUTCOME_FAILURE = "failure"
 
 # Rate-stale is raised from pricing and freshness checks, so it stays shared.
 ERROR_RATES_STALE = "rates_stale"

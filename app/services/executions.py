@@ -7,6 +7,7 @@ failures cannot create partial FX transfers.
 
 import hashlib
 import json
+import logging
 from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
@@ -15,8 +16,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.constants import EXECUTIONS_PATH, HTTP_POST, OUTCOME_SUCCESS
-from app.core.errors import conflict, not_found, validation_error
+from app.core.constants import EXECUTIONS_PATH, HTTP_POST, OUTCOME_FAILURE, OUTCOME_SUCCESS
+from app.core.errors import ApiError, conflict, not_found, validation_error
 from app.core.money import Currency, round_money
 from app.core.observability import (
     execution_failure_total,
@@ -92,6 +93,7 @@ def execute_quote(
         idempotency_conflict_total.inc()
         raise conflict(ERROR_IDEMPOTENCY_CONFLICT, "Idempotency-Key is already in use.") from exc
 
+    quote: Quote | None = None
     try:
         quote = session.execute(select(Quote).where(Quote.id == quote_id).with_for_update()).scalar_one_or_none()
         if quote is None:
@@ -168,7 +170,17 @@ def execute_quote(
             outcome=OUTCOME_SUCCESS,
         )
         return payload, False
-    except Exception:
+    except Exception as exc:
         session.rollback()
         execution_failure_total.inc()
+        log_event(
+            "execution.failed",
+            level=logging.ERROR,
+            request_id=request_id,
+            quote_id=quote_id,
+            customer_id=quote.customer_id if quote is not None else None,
+            idempotency_key=idempotency_key,
+            error_code=exc.code if isinstance(exc, ApiError) else "internal_error",
+            outcome=OUTCOME_FAILURE,
+        )
         raise

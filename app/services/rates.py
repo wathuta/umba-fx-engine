@@ -12,6 +12,8 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal, DecimalException
 from uuid import UUID
 
+import logging
+
 import httpx
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
@@ -251,6 +253,7 @@ def _record_failed_refresh(session: Session, started: datetime, error: ApiError,
     rate_refresh_latency_ms.observe(refresh.duration_ms)
     log_event(
         "rate_refresh.failed",
+        level=logging.ERROR,
         request_id=request_id,
         rate_refresh_id=refresh.id,
         provider=refresh.provider,
