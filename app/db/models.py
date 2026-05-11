@@ -55,7 +55,10 @@ class Customer(Base):
 
 class Balance(Base):
     __tablename__ = "balances"
-    __table_args__ = (UniqueConstraint("customer_id", "currency", name=UQ_BALANCES_CUSTOMER_CURRENCY),)
+    __table_args__ = (
+        UniqueConstraint("customer_id", "currency", name=UQ_BALANCES_CUSTOMER_CURRENCY),
+        CheckConstraint("balance >= 0", name="ck_balances_non_negative"),
+    )
 
     id = uuid_pk()
     customer_id: Mapped[str] = mapped_column(

@@ -40,6 +40,7 @@ def get_balances(session: Session, customer_id: UUID) -> dict[Currency, Decimal]
 def credit_balance(session: Session, customer_id: UUID, currency: Currency, amount: Decimal) -> Decimal:
     assert_customer_exists(session, customer_id)
     rounded = round_money(amount, currency)
+    
     balance = get_balance(session, customer_id, currency, for_update=True)
     adjustment = CreditAdjustment(
         customer_id=customer_id,
@@ -50,6 +51,10 @@ def credit_balance(session: Session, customer_id: UUID, currency: Currency, amou
     )
     session.add(adjustment)
     session.flush()
+    # Write to the ledger — the source of truth for every money movement.
+    # Without this, the balance cache below would have no matching audit row
+    # and the invariant balance == SUM(credits) - SUM(debits) would break.
+    # reference_id ties this ledger entry back to the CreditAdjustment record.
     append_entry(
         session,
         customer_id=customer_id,

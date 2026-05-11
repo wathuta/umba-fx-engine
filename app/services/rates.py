@@ -15,10 +15,12 @@ from uuid import UUID
 import logging
 
 import httpx
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.configs.settings import get_settings
 from app.configs.constants import DECIMAL_ONE, ERROR_RATES_STALE
+from app.db.models import RateRefresh
 from app.repositories.rates import (
     RateRow,
     create_refresh_failure,
@@ -115,46 +117,16 @@ def refresh_rates(
     provider: RateProvider | None = None,
     request_id: str | None = None,
 ) -> tuple[UUID, str, datetime, int]:
-    """Store one refresh attempt and update current rates only on success."""
+    """Orchestrate one refresh attempt: fetch, persist, record outcome."""
     provider = provider or RateProvider()
-    settings = get_settings()
+    # Serializes concurrent refreshes so current_rates is never a mix of two fetches.
+    # The lock is transaction-scoped and released automatically on commit or rollback.
+    session.execute(text("SELECT pg_advisory_xact_lock(hashtext('rate_refresh'))"))
     started = datetime.now(UTC)
     try:
         rates = provider.fetch()
-        raw_hash = hashlib.sha256(json.dumps(rates.raw_payload, sort_keys=True, default=str).encode()).hexdigest()
-        rate_rows = tuple(
-            RateRow(base_currency=base.value, quote_currency=quote.value, mid_rate=round_rate(pair_mid_rate(rates, base, quote)))
-            for base, quote in CANONICAL_PAIRS
-        )
-        refresh = create_refresh_success(
-            session,
-            provider=rates.provider,
-            provider_base_currency=rates.base_currency.value,
-            provider_timestamp=rates.provider_timestamp,
-            fetched_at=started,
-            raw_payload_hash=raw_hash,
-            buy_spread_bps=settings.default_buy_spread_bps,
-            sell_spread_bps=settings.default_sell_spread_bps,
-            pairs_updated=len(rate_rows),
-            duration_ms=0,
-            rate_rows=rate_rows,
-        )
-        # Capture the full refresh cost, including the DB work done by the repository helper.
-        refresh.duration_ms = _duration_ms(started)
-        # Single commit: quotes reading current_rates see either all-old or all-new rates, never a partial refresh.
-        session.commit()
-        rate_refresh_success_total.inc()
-        rate_refresh_latency_ms.observe(refresh.duration_ms)
-        log_event(
-            "rate_refresh.completed",
-            request_id=request_id,
-            rate_refresh_id=refresh.id,
-            provider=rates.provider,
-            status=STATUS_COMPLETED,
-            pairs_updated=refresh.pairs_updated,
-            duration_ms=refresh.duration_ms,
-        )
-        return refresh.id, refresh.status, refresh.fetched_at, refresh.pairs_updated
+        refresh = _persist_successful_refresh(session, rates, started)
+        return _record_successful_refresh(session, refresh, rates.provider, started, request_id)
     except ApiError as exc:
         _record_failed_refresh(session, started, exc, request_id)
         raise
@@ -162,6 +134,66 @@ def refresh_rates(
         error = bad_gateway(ERROR_UPSTREAM_BAD_RESPONSE, "Rate provider returned unusable rates.")
         _record_failed_refresh(session, started, error, request_id)
         raise error from exc
+
+
+def _persist_successful_refresh(session: Session, rates: ProviderRates, started: datetime) -> RateRefresh:
+    """Stage the audit row, snapshots, and current-rate upserts in one transaction.
+
+    Callers commit; this function only flushes so the rollback path in
+    `_record_failed_refresh` can still undo the staged rows on a downstream
+    failure.
+    """
+    settings = get_settings()
+    rate_rows = tuple(
+        RateRow(
+            base_currency=base.value,
+            quote_currency=quote.value,
+            mid_rate=round_rate(pair_mid_rate(rates, base, quote)),
+        )
+        for base, quote in CANONICAL_PAIRS
+    )
+    return create_refresh_success(
+        session,
+        provider=rates.provider,
+        provider_base_currency=rates.base_currency.value,
+        provider_timestamp=rates.provider_timestamp,
+        fetched_at=started,
+        raw_payload_hash=_hash_provider_payload(rates.raw_payload),
+        buy_spread_bps=settings.default_buy_spread_bps,
+        sell_spread_bps=settings.default_sell_spread_bps,
+        pairs_updated=len(rate_rows),
+        duration_ms=0,
+        rate_rows=rate_rows,
+    )
+
+
+def _record_successful_refresh(
+    session: Session,
+    refresh: RateRefresh,
+    provider: str,
+    started: datetime,
+    request_id: str | None,
+) -> tuple[UUID, str, datetime, int]:
+    """Commit the staged refresh, then emit metric + log. Mirrors `_record_failed_refresh`."""
+    refresh.duration_ms = _duration_ms(started)
+    # Single commit: quotes reading current_rates see either all-old or all-new rates, never a partial refresh.
+    session.commit()
+    rate_refresh_success_total.inc()
+    rate_refresh_latency_ms.observe(refresh.duration_ms)
+    log_event(
+        "rate_refresh.completed",
+        request_id=request_id,
+        rate_refresh_id=refresh.id,
+        provider=provider,
+        status=STATUS_COMPLETED,
+        pairs_updated=refresh.pairs_updated,
+        duration_ms=refresh.duration_ms,
+    )
+    return refresh.id, refresh.status, refresh.fetched_at, refresh.pairs_updated
+
+
+def _hash_provider_payload(payload: dict) -> str:
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
 
 
 def ensure_fresh_rates(session: Session) -> None:

@@ -120,6 +120,8 @@ def create_quote(
     executable_rate = round_rate(executable_rate)
     spread_bps = sum(leg.spread_bps for leg in legs)
     source_amount = round_money(source_amount, source_currency)
+
+    # Calculate the final amount.
     destination_amount = round_money(source_amount * executable_rate, destination_currency)
     created_at = datetime.now(UTC)
     quote = Quote(
