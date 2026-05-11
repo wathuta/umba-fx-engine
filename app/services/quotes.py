@@ -13,10 +13,10 @@ from uuid import UUID
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.core.constants import DECIMAL_ONE, ERROR_RATES_STALE, OUTCOME_SUCCESS
-from app.core.errors import service_unavailable, validation_error
-from app.core.money import Currency, round_money, round_rate
-from app.core.observability import log_event, quote_created_total, quote_latency_ms
+from app.configs.constants import DECIMAL_ONE, ERROR_RATES_STALE, OUTCOME_SUCCESS
+from app.utils.errors import service_unavailable, validation_error
+from app.utils.money import Currency, round_money, round_rate
+from app.utils.observability import log_event, quote_created_total, quote_latency_ms
 from app.db.models import CurrentRate, Quote, QuoteLeg
 from app.services.customers import assert_customer_exists
 from app.services.rates import ensure_fresh_rates

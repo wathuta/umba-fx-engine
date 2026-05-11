@@ -4,8 +4,8 @@ from decimal import Decimal
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core.config import get_settings
-from app.core.money import Currency
+from app.configs.settings import get_settings
+from app.utils.money import Currency
 from app.db.models import CurrentRate, RateRefresh, RateSnapshot
 from app.db.session import Base, SessionLocal, engine
 from app.main import app

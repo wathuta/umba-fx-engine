@@ -4,7 +4,7 @@ from uuid import UUID
 
 import pytest
 
-from app.core.money import Currency
+from app.utils.money import Currency
 from tests.unit.helpers import create_customer_with_usd
 
 

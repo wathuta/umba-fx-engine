@@ -9,7 +9,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from starlette.exceptions import HTTPException
 
 from app.api.routes import router
-from app.core.errors import (
+from app.utils.errors import (
     ApiError,
     api_error_handler,
     bad_request,
@@ -18,7 +18,7 @@ from app.core.errors import (
     unhandled_error_handler,
     validation_error,
 )
-from app.core.observability import RequestIdMiddleware
+from app.middleware.request_id import RequestIdMiddleware
 from app.db.session import create_all
 
 

@@ -8,7 +8,7 @@ import uuid
 
 import pytest
 
-from app.core.money import Currency
+from app.utils.money import Currency
 
 # Integration tests intentionally use only public HTTP endpoints. Scenarios that
 # need deterministic provider data or failure injection live in tests/unit until

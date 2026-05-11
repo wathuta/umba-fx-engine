@@ -3,7 +3,7 @@ from decimal import Decimal
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from app.core.money import Currency, round_money, round_rate
+from app.utils.money import Currency, round_money, round_rate
 
 
 @given(

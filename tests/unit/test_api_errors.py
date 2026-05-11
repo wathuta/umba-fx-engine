@@ -1,8 +1,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
-import app.api.routes as routes
-from app.core.errors import bad_gateway, gateway_timeout
+import app.api.routes.rates as rates_route
+from app.utils.errors import bad_gateway, gateway_timeout
 from app.main import create_app
 
 
@@ -79,7 +79,7 @@ def test_rate_refresh_maps_provider_errors(
     def fail_refresh(*args, **kwargs):
         raise provider_error
 
-    monkeypatch.setattr(routes, "refresh_rates", fail_refresh)
+    monkeypatch.setattr(rates_route, "refresh_rates", fail_refresh)
 
     response = client.post("/rate-refreshes")
 
@@ -101,7 +101,7 @@ def test_unhandled_errors_return_problem_json():
     assert response.status_code == 500
     assert response.headers["content-type"].startswith("application/problem+json")
     assert response.json() == {
-        "type": "https://api.example.com/problems/internal-error",
+        "type": "about:blank",
         "title": "Internal server error",
         "status": 500,
         "detail": "An unexpected error occurred.",

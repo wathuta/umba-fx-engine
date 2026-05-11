@@ -7,10 +7,10 @@ from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 from sqlalchemy import delete, func, select
 
-from app.core.constants import DECIMAL_ONE
-from app.core.errors import ApiError, bad_gateway, gateway_timeout
-from app.core.money import Currency, round_money, round_rate
-from app.db.models import CurrentRate, Quote, QuoteLeg, RateRefresh
+from app.configs.constants import DECIMAL_ONE
+from app.utils.errors import ApiError, bad_gateway, gateway_timeout
+from app.utils.money import Currency, round_money, round_rate
+from app.db.models import CurrentRate, Quote, QuoteLeg, RateRefresh, RateSnapshot
 from app.services.customers import create_customer
 from app.services.quotes import create_quote
 from app.services.rates import CANONICAL_PAIRS, ProviderRates, RateProvider, refresh_rates
@@ -250,6 +250,38 @@ def test_failed_rate_refresh_is_audited_without_replacing_current_rates(db_sessi
 
     assert after == before
     assert failed_refresh.error_code == error.code
+
+
+def test_partial_failure_during_refresh_rolls_back_snapshots(db_session, monkeypatch):
+    """A mid-loop failure must not leave half-written snapshots or current_rates."""
+    seed_rates(db_session)
+    snapshots_before = db_session.execute(select(func.count()).select_from(RateSnapshot)).scalar_one()
+    current_rates_before = db_session.execute(select(func.count()).select_from(CurrentRate)).scalar_one()
+
+    # pair_mid_rate is called once per CANONICAL_PAIRS iteration; raise on the third.
+    import app.services.rates as rates_module
+
+    original = rates_module.pair_mid_rate
+    call_count = {"n": 0}
+
+    def raise_on_third(*args, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 3:
+            raise ValueError("simulated mid-loop failure")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr("app.services.rates.pair_mid_rate", raise_on_third)
+
+    with pytest.raises(ApiError) as exc:
+        refresh_rates(db_session, provider=GoodProvider())
+
+    assert exc.value.code == "upstream_bad_response"
+    # No new snapshots or current_rates persisted; the in-flight transaction rolled back.
+    assert db_session.execute(select(func.count()).select_from(RateSnapshot)).scalar_one() == snapshots_before
+    assert db_session.execute(select(func.count()).select_from(CurrentRate)).scalar_one() == current_rates_before
+    # The failure is itself audited as a `failed` RateRefresh row.
+    failed_refresh = db_session.execute(select(RateRefresh).where(RateRefresh.status == "failed")).scalar_one()
+    assert failed_refresh.error_code == "upstream_bad_response"
 
 
 def test_bad_provider_rates_are_audited_as_failed_refresh(db_session):

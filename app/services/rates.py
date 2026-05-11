@@ -19,11 +19,11 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from app.core.config import get_settings
-from app.core.constants import DECIMAL_ONE, ERROR_RATES_STALE
-from app.core.errors import ApiError, bad_gateway, gateway_timeout, service_unavailable
-from app.core.money import Currency, round_rate
-from app.core.observability import (
+from app.configs.settings import get_settings
+from app.configs.constants import DECIMAL_ONE, ERROR_RATES_STALE
+from app.utils.errors import ApiError, bad_gateway, gateway_timeout, service_unavailable
+from app.utils.money import Currency, round_rate
+from app.utils.observability import (
     log_event,
     rate_refresh_failure_total,
     rate_refresh_latency_ms,

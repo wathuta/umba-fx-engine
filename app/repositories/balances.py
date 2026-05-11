@@ -5,8 +5,8 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from app.core.constants import ZERO_MONEY
-from app.core.money import Currency, round_money
+from app.configs.constants import ZERO_MONEY
+from app.utils.money import Currency, round_money
 from app.db.models import UQ_BALANCES_CUSTOMER_CURRENCY, Balance
 
 
