@@ -2,11 +2,23 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, UniqueConstraint, func
+from sqlalchemy import (
+    DDL,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    UniqueConstraint,
+    event,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.constants import ZERO_MONEY
+from app.configs.constants import ZERO_MONEY
 from app.db.session import Base
 
 # String lengths are storage constraints, not arbitrary formatting choices.
@@ -172,22 +184,93 @@ class QuoteLeg(Base):
 
 
 class Execution(Base):
+    """Identity and linkage record. The actual money movement is the two paired
+    `ledger_entries` rows referencing this execution's id — that is the single
+    source of truth for what changed hands.
+    """
+
     __tablename__ = "executions"
     __table_args__ = (UniqueConstraint("quote_id", name="uq_executions_quote_id"),)
 
     id = uuid_pk()
     quote_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("quotes.id"), nullable=False)
     customer_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("customers.id"), nullable=False)
-    debit_currency: Mapped[str] = mapped_column(String(CURRENCY_CODE_LENGTH), nullable=False)
-    debit_amount: Mapped[Decimal] = mapped_column(Numeric(NUMERIC_PRECISION, MONEY_SCALE), nullable=False)
-    credit_currency: Mapped[str] = mapped_column(String(CURRENCY_CODE_LENGTH), nullable=False)
-    credit_amount: Mapped[Decimal] = mapped_column(Numeric(NUMERIC_PRECISION, MONEY_SCALE), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# Reason and source strings are short codes consumers can grep against.
+CREDIT_REASON_MAX_LENGTH = 64
+CREDIT_SOURCE_MAX_LENGTH = 32
+
+
+class CreditAdjustment(Base):
+    """Manual balance credit record. Resolves the `reference_id` on credit
+    ledger entries so every ledger row points at a real audit record.
+    """
+
+    __tablename__ = "credit_adjustments"
+
+    id = uuid_pk()
+    customer_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("customers.id"),
+        nullable=False,
+        index=True,
+    )
+    currency: Mapped[str] = mapped_column(String(CURRENCY_CODE_LENGTH), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(NUMERIC_PRECISION, MONEY_SCALE), nullable=False)
+    reason: Mapped[str] = mapped_column(String(CREDIT_REASON_MAX_LENGTH), nullable=False)
+    source: Mapped[str] = mapped_column(String(CREDIT_SOURCE_MAX_LENGTH), nullable=False)
+    actor_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LedgerEntry(Base):
+    """Append-only money-movement record.
+
+    Source of truth for balances — every credit_balance and execute_quote
+    inserts one or more entries here. `balances` is a materialized cache and
+    must always equal `SUM(credit) - SUM(debit)` per (customer, currency).
+    Rows are never updated or deleted; corrections insert a reversing entry.
+    """
+
+    __tablename__ = "ledger_entries"
+    __table_args__ = (
+        UniqueConstraint(
+            "reference_type",
+            "reference_id",
+            "direction",
+            name="uq_ledger_entries_reference_direction",
+        ),
+        Index("ix_ledger_entries_customer_currency", "customer_id", "currency"),
+        CheckConstraint("amount > 0", name="ck_ledger_entries_positive_amount"),
+        CheckConstraint("direction IN ('debit', 'credit')", name="ck_ledger_entries_direction"),
+    )
+
+    id = uuid_pk()
+    customer_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("customers.id"),
+        nullable=False,
+        index=True,
+    )
+    currency: Mapped[str] = mapped_column(String(CURRENCY_CODE_LENGTH), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(
+        Numeric(NUMERIC_PRECISION, MONEY_SCALE),
+        nullable=False,
+    )
+    direction: Mapped[str] = mapped_column(String(8), nullable=False)
+    reference_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    reference_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class IdempotencyKey(Base):
     __tablename__ = "idempotency_keys"
-    __table_args__ = (UniqueConstraint("endpoint", "key", name="uq_idempotency_endpoint_key"),)
+    __table_args__ = (
+        UniqueConstraint("endpoint", "key", name="uq_idempotency_endpoint_key"),
+        Index("ix_idempotency_keys_created_at", "created_at"),
+    )
 
     id = uuid_pk()
     endpoint: Mapped[str] = mapped_column(String(IDEMPOTENCY_ENDPOINT_MAX_LENGTH), nullable=False)
@@ -197,3 +280,33 @@ class IdempotencyKey(Base):
     status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+# DB-level append-only enforcement.
+#
+# These tables capture audit history that must never be UPDATEd or DELETEd
+# once committed. The Postgres trigger below raises so a stray query, ad-hoc
+# fix, or future migration cannot silently corrupt the audit trail. Tables
+# that are intentionally mutable (`balances`, `idempotency_keys`,
+# `rate_refreshes`, `current_rates`) are not in this list.
+_IMMUTABLE_TABLES = (LedgerEntry, CreditAdjustment, Execution, Quote, QuoteLeg, RateSnapshot)
+
+_REJECT_MODIFICATION_FN = DDL(
+    """
+    CREATE OR REPLACE FUNCTION reject_modification() RETURNS trigger AS $$
+    BEGIN
+        RAISE EXCEPTION '%% rows are immutable', TG_TABLE_NAME;
+    END;
+    $$ LANGUAGE plpgsql;
+    """
+)
+event.listen(Base.metadata, "before_create", _REJECT_MODIFICATION_FN)
+
+for _immutable_table_class in _IMMUTABLE_TABLES:
+    _table_name = _immutable_table_class.__tablename__
+    _trigger_ddl = DDL(
+        f"CREATE TRIGGER {_table_name}_immutable "
+        f"BEFORE UPDATE OR DELETE ON {_table_name} "
+        f"FOR EACH ROW EXECUTE FUNCTION reject_modification()"
+    )
+    event.listen(_immutable_table_class.__table__, "after_create", _trigger_ddl)

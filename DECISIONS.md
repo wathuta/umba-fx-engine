@@ -21,9 +21,17 @@
 * Chose Python `Decimal` plus Postgres `NUMERIC` over integer minor units. Storage and rounding rules are in `SPEC.md` §2.
 * Reasoning: FX still needs decimal rate math, so integer cents would add boundary-conversion code at the API and DB without removing the underlying precision problem.
 * `ROUND_HALF_EVEN` reduces long-term rounding bias across repeated transactions and is the banker's-rounding default.
-* Future improvement: revisit integer minor units for a larger immutable ledger.
 
-### 3. Quotes and Rate Storage
+### 3. Ledger Model
+
+* Chose a **double-entry ledger with a materialized `balances` cache** over in-place balance updates.
+* Every credit and every execution inserts append-only `ledger_entries` rows (positive amounts, `direction = debit | credit`) in the same transaction as the `balances` update.
+* `ledger_entries` is the source of truth; `balances` is a cache. The invariant `balance == SUM(credits) - SUM(debits)` per `(customer, currency)` is asserted in tests after every money-moving operation and can be reconciled in production from the ledger alone.
+* DB-level guards: `CHECK (amount > 0)`, `CHECK (direction IN ('debit','credit'))`, and `UNIQUE (reference_type, reference_id, direction)` so a single execution cannot produce two debits or two credits.
+* DB-level immutability: a Postgres `BEFORE UPDATE OR DELETE` trigger raises on `ledger_entries`, `credit_adjustments`, `executions`, `quotes`, `quote_legs`, and `rate_snapshots`. An ad-hoc query against the audit tables cannot silently corrupt history; the app role never gets the privilege to do so by accident.
+* Tradeoff: an extra two inserts per execution; in return, a full audit trail and the ability to rebuild balances at any point in time.
+
+### 4. Quotes and Rate Storage
 
 **Stored quote terms.** The accepted executable rate, route, spread, source/destination amounts, expiry, and snapshot link are persisted at quote time (table layout in `SPEC.md` §3, §6). Execution uses the stored terms only — never recomputed. This prevents repricing after a rate refresh and makes idempotent replay trivial.
 
@@ -35,22 +43,22 @@
 
 **Current rates + immutable snapshots.** `current_rates` gives fast reads and a simple freshness check; `rate_snapshots` keeps immutable provider history for audit. Tradeoff: refresh writes are slightly more complex (history insert + latest upsert in one transaction); the read path stays simple.
 
-### 4. Rate Provider
+### 5. Rate Provider
 
 * Used `fxapi.app` because it returns real exchange rates without an API key and was reachable during implementation.
 * The earlier-considered provider required a key and signup was unavailable from Nairobi.
 * Tradeoff: practical for a take-home, not enough for production on its own.
 * Production improvement: add an SLA-backed provider, failure monitoring, and a fallback rate source.
 
-### 5. Observability
+### 6. Observability
 
 * Structured JSON logs plus `/healthz`, `/readyz`, and `/metrics` (fields and metrics listed in `SPEC.md` §14).
 * Logs link quote and execute activity by `request_id`, `customer_id`, `quote_id`, and `execution_id`.
-* `/healthz` is liveness-style (DB connectivity); `/readyz` is stricter (DB + fresh rates) so a stale provider takes the service out of rotation without killing it.
+* `/healthz` reports process liveness only (no DB or rate check); `/readyz` is stricter (DB ping + rate freshness) so a stale provider or unreachable database takes the service out of rotation without killing the process.
 * Metrics distinguish client-side rejections (insufficient funds, idempotency conflict, expired quote) from upstream and provider failures, so a single counter spike has a clear cause.
 * What I did not add: full distributed tracing — extra infrastructure without proving more of the core behavior.
 
-### 6. Scope
+### 7. Scope
 
 * Deferred Alembic migrations, scheduled rate refresh, fallback provider, demo script, load-test output, CI lint/type gating, and tracing dashboards (full list in `README.md` "With Another Day").
 * Spent that time on tests for money correctness, concurrency, idempotency, and atomic rollback — the behaviors the assignment grades hardest.

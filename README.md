@@ -133,11 +133,19 @@ Example execution log:
 
 ### Metrics counter semantics
 
-`fx_execution_failure_total` increments on any non-success exit from the execution
-path — including expired quotes, idempotency conflicts, and insufficient funds. Read
-it alongside `fx_insufficient_funds_total`, `fx_idempotency_conflict_total`, and
-`fx_quote_expired_total` to distinguish expected client-side rejections from true
-system failures.
+- `fx_execution_failure_total` increments only on inside-try failures —
+  after the idempotency-key row has been claimed. Covers
+  `quote_not_found`, `quote_already_executed`, `quote_expired`,
+  `insufficient_funds`, and any system fault.
+- `fx_idempotency_conflict_total` counts pre-flight rejections that
+  never reach the work block: hash mismatch on an existing key and the
+  race-loser `IntegrityError` on a concurrent insert. These do not
+  increment `fx_execution_failure_total`.
+- `fx_quote_expired_total` and `fx_insufficient_funds_total` are
+  per-reason subsets of `fx_execution_failure_total`, useful for
+  splitting client friction from true system faults on dashboards.
+- `fx_idempotency_replay_total` counts successful replays (cached
+  responses returned) and is not a failure signal.
 
 ## Tests
 
@@ -188,13 +196,22 @@ Run the command locally to see the current test count.
 
 - **Balance credits:** test-only endpoint; production funding would need auth,
   rails, and audit workflow.
-- **Ledger model:** balances are updated in place; production should use
-  immutable ledger entries.
+- **Ledger model:** double-entry `ledger_entries` are append-only and the
+  source of truth; `balances` is a materialized cache asserted equal in
+  tests. Immutability on `ledger_entries`, `credit_adjustments`,
+  `executions`, `quotes`, `quote_legs`, and `rate_snapshots` is enforced by
+  `BEFORE UPDATE OR DELETE` triggers installed from `app/db/models.py`.
+  Production should also `REVOKE UPDATE, DELETE` from the app role and add
+  a scheduled reconciliation job.
 - **Schema changes:** tables are created at startup; production should use
   Alembic migrations.
 - **Rate refresh:** manual through `POST /rate-refreshes` and single-provider;
   production should add scheduling, retries, failover, and stale-rate alerts.
 - **Metrics:** local `/metrics` only; not connected to dashboards or alerting.
+- **Idempotency keys:** retained indefinitely. Production needs an
+  `expires_at` column, a `created_at` index, and a periodic cleanup job
+  (24–72h retention). Deferred to a follow-up — see
+  `implementation_findings.md` A-001.
 
 ## With Another Day
 
@@ -205,6 +222,7 @@ Run the command locally to see the current test count.
 - Add load-test output for quote/execution paths.
 - Add stricter linting/type checks and enforce them in CI.
 - Add tracing dashboards beyond structured logs and `/metrics`.
+- Add idempotency-key retention (`expires_at` column + scheduled cleanup).
 - Add richer OpenAPI examples.
 
 ## Time Tracking
@@ -212,8 +230,8 @@ Run the command locally to see the current test count.
 I'm currently working a full-time role, so this was done across evenings and
 breaks with quite a bit of context switching between tasks.
 
-**Active-engagement time:** ~11 hours.
-**Wall-clock span:** 07 May 2026 – 09 May 2026 (3 calendar days).
+**Active-engagement time:** ~14 hours.
+**Wall-clock span:** ~3 days of focused work between 07 May and 10 May 2026.
 
 ### 07 May 2026
 
@@ -227,9 +245,23 @@ breaks with quite a bit of context switching between tasks.
 
 ### 08 May 2026
 
-- 3:10 PM – 4:30 PM — generated code review and code updates
-- 7:30 PM – 9:00 PM — code review and updates
+- 1:52 PM – 4:30 PM — initial implementation, linting, and code review
+- 7:23 PM – 9:36 PM — test coverage and refactoring
 
 ### 09 May 2026
 
-- 8:00 AM – 11:26 AM — code review and manual testing
+- 5:44 AM – 9:15 AM — code review, observability, and manual testing
+- 10:11 PM – 11:37 PM — docs, healthz/readyz split, validation errors, and REVIEW.md
+
+### 10 May 2026
+
+- 6:30 PM – 7:00 PM — promote failure-path `log_event` calls to `ERROR` level
+
+### 11 May 2026
+
+- 11:00 PM – 11:30 PM — implementation-findings follow-ups (DB immutability triggers, schema-required `Idempotency-Key`, `execution.rejected` split, idempotency-key index) and final polish
+
+## AI Tools Used
+
+- **OpenAI Codex 5.3** — scaffolding, code generation, and test drafting.
+- **Claude Code (claude-sonnet-4-6)** — code review passes.
