@@ -196,13 +196,13 @@ Run the command locally to see the current test count.
 
 - **Balance credits:** test-only endpoint; production funding would need auth,
   rails, and audit workflow.
-- **Ledger model:** double-entry `ledger_entries` are append-only and the
-  source of truth; `balances` is a materialized cache asserted equal in
-  tests. Immutability on `ledger_entries`, `credit_adjustments`,
-  `executions`, `quotes`, `quote_legs`, and `rate_snapshots` is enforced by
-  `BEFORE UPDATE OR DELETE` triggers installed from `app/db/models.py`.
-  Production should also `REVOKE UPDATE, DELETE` from the app role and add
-  a scheduled reconciliation job.
+- **Ledger model:** money changes are recorded in an append-only ledger,
+  and balances are kept as a cached view of that ledger. The tests check
+  that the two stay in sync. History tables such as `ledger_entries`,
+  `credit_adjustments`, `executions`, `quotes`, `quote_legs`, and
+  `rate_snapshots` are protected from update/delete writes by triggers in
+  `app/db/models.py`. Production should also remove update/delete access
+  from the app role and run a scheduled reconciliation job.
 - **Schema changes:** tables are created at startup; production should use
   Alembic migrations.
 - **Rate refresh:** manual through `POST /rate-refreshes` and single-provider;

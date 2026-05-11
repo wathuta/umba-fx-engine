@@ -15,12 +15,16 @@ from uuid import UUID
 import logging
 
 import httpx
-from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.configs.settings import get_settings
 from app.configs.constants import DECIMAL_ONE, ERROR_RATES_STALE
+from app.repositories.rates import (
+    RateRow,
+    create_refresh_failure,
+    create_refresh_success,
+    get_latest_current_rate,
+)
 from app.utils.errors import ApiError, bad_gateway, gateway_timeout, service_unavailable
 from app.utils.money import Currency, round_rate
 from app.utils.observability import (
@@ -30,8 +34,6 @@ from app.utils.observability import (
     rate_refresh_success_total,
     stale_rates_total,
 )
-from app.db.models import UQ_CURRENT_RATES_PAIR, CurrentRate, RateRefresh, RateSnapshot
-
 # Upstream failures from the provider are normalized to this client-facing code.
 ERROR_UPSTREAM_BAD_RESPONSE = "upstream_bad_response"
 
@@ -120,56 +122,24 @@ def refresh_rates(
     try:
         rates = provider.fetch()
         raw_hash = hashlib.sha256(json.dumps(rates.raw_payload, sort_keys=True, default=str).encode()).hexdigest()
-        refresh = RateRefresh(
+        rate_rows = tuple(
+            RateRow(base_currency=base.value, quote_currency=quote.value, mid_rate=round_rate(pair_mid_rate(rates, base, quote)))
+            for base, quote in CANONICAL_PAIRS
+        )
+        refresh = create_refresh_success(
+            session,
             provider=rates.provider,
-            status=STATUS_COMPLETED,
             provider_base_currency=rates.base_currency.value,
             provider_timestamp=rates.provider_timestamp,
             fetched_at=started,
-            pairs_updated=0,
-            duration_ms=_duration_ms(started),
+            raw_payload_hash=raw_hash,
+            buy_spread_bps=settings.default_buy_spread_bps,
+            sell_spread_bps=settings.default_sell_spread_bps,
+            pairs_updated=len(rate_rows),
+            duration_ms=0,
+            rate_rows=rate_rows,
         )
-        session.add(refresh)
-        session.flush()
-        updated = 0
-        for base, quote in CANONICAL_PAIRS:
-            mid_rate = round_rate(pair_mid_rate(rates, base, quote))
-            snapshot = RateSnapshot(
-                rate_refresh_id=refresh.id,
-                base_currency=base.value,
-                quote_currency=quote.value,
-                mid_rate=mid_rate,
-                provider=rates.provider,
-                provider_timestamp=rates.provider_timestamp,
-                fetched_at=started,
-                raw_payload_hash=raw_hash,
-            )
-            session.add(snapshot)
-            session.flush()
-            session.execute(
-                insert(CurrentRate)
-                .values(
-                    base_currency=base.value,
-                    quote_currency=quote.value,
-                    mid_rate=mid_rate,
-                    buy_spread_bps=settings.default_buy_spread_bps,
-                    sell_spread_bps=settings.default_sell_spread_bps,
-                    rate_snapshot_id=snapshot.id,
-                    last_updated_at=started,
-                )
-                .on_conflict_do_update(
-                    constraint=UQ_CURRENT_RATES_PAIR,
-                    set_={
-                        "mid_rate": mid_rate,
-                        "buy_spread_bps": settings.default_buy_spread_bps,
-                        "sell_spread_bps": settings.default_sell_spread_bps,
-                        "rate_snapshot_id": snapshot.id,
-                        "last_updated_at": started,
-                    },
-                )
-            )
-            updated += 1
-        refresh.pairs_updated = updated
+        # Capture the full refresh cost, including the DB work done by the repository helper.
         refresh.duration_ms = _duration_ms(started)
         # Single commit: quotes reading current_rates see either all-old or all-new rates, never a partial refresh.
         session.commit()
@@ -181,10 +151,10 @@ def refresh_rates(
             rate_refresh_id=refresh.id,
             provider=rates.provider,
             status=STATUS_COMPLETED,
-            pairs_updated=updated,
+            pairs_updated=refresh.pairs_updated,
             duration_ms=refresh.duration_ms,
         )
-        return refresh.id, refresh.status, refresh.fetched_at, updated
+        return refresh.id, refresh.status, refresh.fetched_at, refresh.pairs_updated
     except ApiError as exc:
         _record_failed_refresh(session, started, exc, request_id)
         raise
@@ -206,9 +176,7 @@ def ensure_fresh_rates(session: Session) -> None:
 
 def rates_freshness_status(session: Session) -> str:
     """Return rate readiness without mutating quote-path metrics."""
-    latest = session.execute(
-        select(CurrentRate).order_by(CurrentRate.last_updated_at.desc()).limit(1)
-    ).scalar_one_or_none()
+    latest = get_latest_current_rate(session)
     if latest is None:
         return "unavailable"
     cutoff = datetime.now(UTC) - timedelta(seconds=get_settings().rate_freshness_seconds)
@@ -236,18 +204,16 @@ def _provider_timestamp(value: object) -> datetime | None:
 
 def _record_failed_refresh(session: Session, started: datetime, error: ApiError, request_id: str | None) -> None:
     session.rollback()
-    refresh = RateRefresh(
+    refresh = create_refresh_failure(
+        session,
         provider=PROVIDER_FXAPI_APP,
-        status=STATUS_FAILED,
-        provider_base_currency=None,
-        provider_timestamp=None,
         fetched_at=started,
-        pairs_updated=0,
         error_code=error.code,
         error_message=error.detail,
-        duration_ms=_duration_ms(started),
+        duration_ms=0,
     )
-    session.add(refresh)
+    # Record the full failure path, including the audit row insert.
+    refresh.duration_ms = _duration_ms(started)
     session.commit()
     rate_refresh_failure_total.inc()
     rate_refresh_latency_ms.observe(refresh.duration_ms)

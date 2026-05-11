@@ -10,16 +10,16 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.configs.constants import DECIMAL_ONE, ERROR_RATES_STALE, OUTCOME_SUCCESS
+from app.configs.settings import get_settings
 from app.utils.errors import service_unavailable, validation_error
 from app.utils.money import Currency, round_money, round_rate
 from app.utils.observability import log_event, quote_created_total, quote_latency_ms
 from app.db.models import CurrentRate, Quote, QuoteLeg
 from app.services.customers import assert_customer_exists
-from app.services.rates import ensure_fresh_rates
+from app.repositories.rates import CurrentRateBook, load_current_rate_book
 
 # Spread math uses basis points, where 10,000 bps equals 100%.
 BASIS_POINT_DENOMINATOR = Decimal("10000")
@@ -50,24 +50,17 @@ class LegPricing:
     rate_snapshot_id: UUID
 
 
-def find_current_rate(session: Session, source: Currency, destination: Currency) -> CurrentRate | None:
-    return session.execute(
-        select(CurrentRate).where(
-            or_(
-                (CurrentRate.base_currency == source.value) & (CurrentRate.quote_currency == destination.value),
-                (CurrentRate.base_currency == destination.value) & (CurrentRate.quote_currency == source.value),
-            )
-        )
-    ).scalar_one_or_none()
+def _find_current_rate(rate_book: CurrentRateBook, source: Currency, destination: Currency) -> CurrentRate | None:
+    return rate_book.rates.get((source, destination)) or rate_book.rates.get((destination, source))
 
 
-def build_route(session: Session, source: Currency, destination: Currency) -> list[Currency]:
+def build_route(rate_book: CurrentRateBook, source: Currency, destination: Currency) -> list[Currency]:
     """Choose the route in this order: direct, USD, then EUR."""
-    if find_current_rate(session, source, destination):
+    if _find_current_rate(rate_book, source, destination):
         return [source, destination]
     for pivot in (Currency.USD, Currency.EUR):
-        source_to_pivot = find_current_rate(session, source, pivot)
-        pivot_to_destination = find_current_rate(session, pivot, destination)
+        source_to_pivot = _find_current_rate(rate_book, source, pivot)
+        pivot_to_destination = _find_current_rate(rate_book, pivot, destination)
         if pivot not in (source, destination) and source_to_pivot and pivot_to_destination:
             return [source, pivot, destination]
     raise service_unavailable(ERROR_RATES_STALE, f"No route available for {source.value}/{destination.value}.")
@@ -102,18 +95,28 @@ def create_quote(
     """Create an immutable quote without reading or mutating customer balances."""
     if source_currency == destination_currency:
         raise validation_error("source_currency and destination_currency must differ.")
+
     assert_customer_exists(session, customer_id)
-    ensure_fresh_rates(session)
-    route = build_route(session, source_currency, destination_currency)
+    rate_book = load_current_rate_book(session)
+    if rate_book.last_updated_at is None:
+        raise service_unavailable(ERROR_RATES_STALE, "Rates are unavailable.")
+    if rate_book.last_updated_at < datetime.now(UTC) - timedelta(seconds=get_settings().rate_freshness_seconds):
+        raise service_unavailable(ERROR_RATES_STALE, "Rates are stale.")
+    route = build_route(rate_book, source_currency, destination_currency)
+
     legs: list[LegPricing] = []
+    # Price each hop separately so routed quotes keep the stored spread and
+    # snapshot for every step in the path.
     for source, destination in zip(route, route[1:], strict=False):
-        current_rate = find_current_rate(session, source, destination)
+        current_rate = _find_current_rate(rate_book, source, destination)
         if current_rate is None:
             raise service_unavailable(ERROR_RATES_STALE, f"Rate missing for {source.value}/{destination.value}.")
         legs.append(price_leg(current_rate, source, destination))
+
     executable_rate = DECIMAL_ONE
     for leg in legs:
         executable_rate *= leg.executable_rate
+
     executable_rate = round_rate(executable_rate)
     spread_bps = sum(leg.spread_bps for leg in legs)
     source_amount = round_money(source_amount, source_currency)
