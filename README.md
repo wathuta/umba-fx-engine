@@ -227,8 +227,8 @@ Run the command locally to see the current test count.
 
 ## Time Tracking
 
-I'm currently working a full-time role, so this was done across evenings and
-breaks with quite a bit of context switching between tasks.
+I'm currently working a full-time role with a take-home submission deadline of 10 May 2026,
+so this was done across evenings and breaks with quite a bit of context switching between tasks.
 
 **Active-engagement time:** ~14 hours.
 **Wall-clock span:** ~3 days of focused work between 07 May and 10 May 2026.
