@@ -43,6 +43,10 @@
 
 **Current rates + immutable snapshots.** `current_rates` gives fast reads and a simple freshness check; `rate_snapshots` keeps immutable provider history for audit. Tradeoff: refresh writes are slightly more complex (history insert + latest upsert in one transaction); the read path stays simple.
 
+**Only store rates the provider actually sends.** `CANONICAL_PAIRS` keeps only USD/KES, USD/NGN, and USD/EUR. EUR/KES, EUR/NGN, and KES/NGN were previously stored as triangulated rates (USD rates divided), which earned one spread (~50 bps) where two were owed (~100 bps). Removing them forces cross pairs through USD at quote time, giving each leg its own directional spread. The audit invariant holds: product of stored leg rates equals the parent rate.
+
+**`pair_mid_rate` simplified.** Previously handled direct lookup, inverse, and cross-pair division. With only USD pairs in `CANONICAL_PAIRS`, only direct lookup is needed. The function now takes the quote currency and returns the provider rate for it. Restore the other branches if non-USD pairs are added back.
+
 ### 5. Rate Provider
 
 * Used `fxapi.app` because it returns real exchange rates without an API key and was reachable during implementation.

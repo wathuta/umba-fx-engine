@@ -105,7 +105,8 @@ Routing:
 - Prefer direct pair when the requested pair or its canonical inverse exists in `current_rates`.
 - Else route through USD.
 - Else route through EUR.
-- `current_rates` stores one canonical orientation per currency pair; inverses are derived in code.
+- `current_rates` stores only provider-supplied pairs (USD/KES, USD/NGN, USD/EUR); cross pairs are not stored, so EUR/KES, EUR/NGN, and KES/NGN always route through USD.
+- `current_rates` stores one canonical orientation per stored pair; inverses are derived in code.
 - Cross routes compute an executable rate per leg.
 - Cross-route executable rate = rounded product of stored leg executable rates.
 - Cross-route spreads compound per leg.

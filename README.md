@@ -220,7 +220,7 @@ Run the command locally to see the current test count.
   `POST /rate-refreshes` as an admin/debug endpoint.
 - Add an executable demo script that creates a customer, credits balance, quotes, and executes.
 - Add load-test output for quote/execution paths.
-- Add stricter linting/type checks and enforce them in CI.
+- Add stricter linting, type checks, and dependency vulnerability scans and enforce them in CI.
 - Add tracing dashboards beyond structured logs and `/metrics`.
 - Add idempotency-key retention (`expires_at` column + scheduled cleanup).
 - Add richer OpenAPI examples.

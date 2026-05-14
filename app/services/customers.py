@@ -4,11 +4,11 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.configs.constants import LEDGER_DIRECTION_CREDIT, LEDGER_REF_CREDIT_ADJUSTMENT
+from app.db.models import CreditAdjustment, Customer
+from app.repositories.balances import ensure_all_balances, ensure_balance, get_balance_for_update, list_balances
+from app.repositories.ledger import append_entry
 from app.utils.errors import not_found
 from app.utils.money import Currency, round_money
-from app.db.models import CreditAdjustment, Customer
-from app.repositories.balances import ensure_all_balances, get_balance, list_balances
-from app.repositories.ledger import append_entry
 
 # Default reason/source for the test-only credit endpoint. A production-grade
 # credit flow would take these from an authenticated admin request payload.
@@ -40,8 +40,9 @@ def get_balances(session: Session, customer_id: UUID) -> dict[Currency, Decimal]
 def credit_balance(session: Session, customer_id: UUID, currency: Currency, amount: Decimal) -> Decimal:
     assert_customer_exists(session, customer_id)
     rounded = round_money(amount, currency)
-    
-    balance = get_balance(session, customer_id, currency, for_update=True)
+
+    ensure_balance(session, customer_id, currency)
+    balance = get_balance_for_update(session, customer_id, currency)
     adjustment = CreditAdjustment(
         customer_id=customer_id,
         currency=currency.value,

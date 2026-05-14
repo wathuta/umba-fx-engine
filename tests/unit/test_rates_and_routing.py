@@ -5,7 +5,7 @@ import httpx
 import pytest
 from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select
 
 from app.configs.constants import DECIMAL_ONE
 from app.utils.errors import ApiError, bad_gateway, gateway_timeout
@@ -136,10 +136,6 @@ def test_inverse_route_uses_buy_spread(client, db_session, seeded_rates):
 
 
 def test_cross_route_compounds_leg_spreads(client, db_session, seeded_rates):
-    db_session.execute(
-        delete(CurrentRate).where(CurrentRate.base_currency == "KES", CurrentRate.quote_currency == "NGN")
-    )
-    db_session.commit()
     customer_id = create_customer_with_usd(client)
 
     response = client.post(
@@ -168,6 +164,74 @@ def test_cross_route_compounds_leg_spreads(client, db_session, seeded_rates):
     assert quote.spread_bps == 100
     assert [leg.position for leg in legs] == [0, 1]
     assert [(leg.source_currency, leg.destination_currency) for leg in legs] == [("KES", "USD"), ("USD", "NGN")]
+    assert legs[0].spread_side == "buy" and legs[1].spread_side == "sell"
+    assert legs[0].executable_rate == leg_one and legs[1].executable_rate == leg_two
+    assert legs[0].rate_snapshot_id != legs[1].rate_snapshot_id
+
+
+def test_eur_kes_cross_route_compounds_leg_spreads(client, db_session, seeded_rates):
+    customer_id = create_customer_with_usd(client)
+
+    response = client.post(
+        "/quotes",
+        json={
+            "customer_id": customer_id,
+            "source_currency": "EUR",
+            "destination_currency": "KES",
+            "source_amount": "100.00",
+        },
+    )
+
+    leg_one = round_rate(Decimal("1") / (Decimal("0.8000000000") * Decimal("1.005")))
+    leg_two = round_rate(Decimal("130.0000000000") * Decimal("0.995"))
+    expected_rate = round_rate(leg_one * leg_two)
+    expected_destination = round_money(Decimal("100.00") * expected_rate, Currency.KES)
+    quote = db_session.execute(select(Quote)).scalar_one()
+    legs = db_session.execute(
+        select(QuoteLeg).where(QuoteLeg.quote_id == quote.id).order_by(QuoteLeg.position)
+    ).scalars().all()
+
+    assert response.status_code == 200
+    assert response.json()["route"] == ["EUR", "USD", "KES"]
+    assert response.json()["executable_rate"] == str(expected_rate)
+    assert response.json()["destination_amount"] == str(expected_destination)
+    assert quote.spread_bps == 100
+    assert [leg.position for leg in legs] == [0, 1]
+    assert [(leg.source_currency, leg.destination_currency) for leg in legs] == [("EUR", "USD"), ("USD", "KES")]
+    assert legs[0].spread_side == "buy" and legs[1].spread_side == "sell"
+    assert legs[0].executable_rate == leg_one and legs[1].executable_rate == leg_two
+    assert legs[0].rate_snapshot_id != legs[1].rate_snapshot_id
+
+
+def test_eur_ngn_cross_route_compounds_leg_spreads(client, db_session, seeded_rates):
+    customer_id = create_customer_with_usd(client)
+
+    response = client.post(
+        "/quotes",
+        json={
+            "customer_id": customer_id,
+            "source_currency": "EUR",
+            "destination_currency": "NGN",
+            "source_amount": "100.00",
+        },
+    )
+
+    leg_one = round_rate(Decimal("1") / (Decimal("0.8000000000") * Decimal("1.005")))
+    leg_two = round_rate(Decimal("1500.0000000000") * Decimal("0.995"))
+    expected_rate = round_rate(leg_one * leg_two)
+    expected_destination = round_money(Decimal("100.00") * expected_rate, Currency.NGN)
+    quote = db_session.execute(select(Quote)).scalar_one()
+    legs = db_session.execute(
+        select(QuoteLeg).where(QuoteLeg.quote_id == quote.id).order_by(QuoteLeg.position)
+    ).scalars().all()
+
+    assert response.status_code == 200
+    assert response.json()["route"] == ["EUR", "USD", "NGN"]
+    assert response.json()["executable_rate"] == str(expected_rate)
+    assert response.json()["destination_amount"] == str(expected_destination)
+    assert quote.spread_bps == 100
+    assert [leg.position for leg in legs] == [0, 1]
+    assert [(leg.source_currency, leg.destination_currency) for leg in legs] == [("EUR", "USD"), ("USD", "NGN")]
     assert legs[0].spread_side == "buy" and legs[1].spread_side == "sell"
     assert legs[0].executable_rate == leg_one and legs[1].executable_rate == leg_two
     assert legs[0].rate_snapshot_id != legs[1].rate_snapshot_id

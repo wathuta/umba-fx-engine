@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.api.schemas.executions import ExecutionResponse, LegResponse
 from app.configs.constants import (
     EXECUTIONS_PATH,
     HTTP_POST,
@@ -25,6 +26,9 @@ from app.configs.constants import (
     OUTCOME_FAILURE,
     OUTCOME_SUCCESS,
 )
+from app.db.models import Execution, IdempotencyKey, LedgerEntry, Quote
+from app.repositories.balances import ensure_balance, get_balance_for_update
+from app.repositories.ledger import append_entry
 from app.utils.errors import ApiError, conflict, not_found, validation_error
 from app.utils.money import Currency, round_money
 from app.utils.observability import (
@@ -37,10 +41,6 @@ from app.utils.observability import (
     log_event,
     quote_expired_total,
 )
-from app.api.schemas.executions import ExecutionResponse, LegResponse
-from app.db.models import Execution, IdempotencyKey, LedgerEntry, Quote
-from app.repositories.balances import get_balance
-from app.repositories.ledger import append_entry
 
 # Error codes — referenced at raise sites and in EXECUTION_REJECTION_CODES below,
 # so they live as named constants to keep the two sites in sync.
@@ -188,9 +188,9 @@ def execute_quote(
         currencies = sorted((source_currency, destination_currency), key=lambda c: c.value)
         # Create missing balance rows before row locks so lock order is predictable.
         for currency in currencies:
-            get_balance(session, quote.customer_id, currency, for_update=False)
+            ensure_balance(session, quote.customer_id, currency)
         locked = {
-            currency: get_balance(session, quote.customer_id, currency, for_update=True) for currency in currencies
+            currency: get_balance_for_update(session, quote.customer_id, currency) for currency in currencies
         }
         source_balance = locked[source_currency]
         destination_balance = locked[destination_currency]

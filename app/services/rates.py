@@ -46,14 +46,14 @@ PROVIDER_FXAPI_APP = "fxapi.app"
 STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
 
-# Stored rate directions; inverses are calculated in code.
+# Only provider-supplied pairs are stored. Cross pairs (EUR/KES, EUR/NGN,
+# KES/NGN) are derived at quote time by `build_route()` + `price_leg()` so
+# each hop earns its own directional spread instead of one spread on a
+# triangulated single rate.
 CANONICAL_PAIRS: tuple[tuple[Currency, Currency], ...] = (
     (Currency.USD, Currency.KES),
     (Currency.USD, Currency.NGN),
     (Currency.USD, Currency.EUR),
-    (Currency.EUR, Currency.KES),
-    (Currency.EUR, Currency.NGN),
-    (Currency.KES, Currency.NGN),
 )
 
 
@@ -80,6 +80,7 @@ class RateProvider:
             raise gateway_timeout("Rate provider timed out.") from exc
         except httpx.HTTPError as exc:
             raise bad_gateway(ERROR_UPSTREAM_BAD_RESPONSE, "Rate provider request failed.") from exc
+        
         try:
             payload = response.json()
         except ValueError as exc:
@@ -88,12 +89,15 @@ class RateProvider:
             raise bad_gateway(ERROR_UPSTREAM_BAD_RESPONSE, "Rate provider returned an HTTP error.")
         if payload.get("success") is False or "rates" not in payload:
             raise bad_gateway(ERROR_UPSTREAM_BAD_RESPONSE, "Rate provider returned an unusable response.")
+        
+        # Sanitize the providers response for storage
         try:
             base_currency = Currency(payload.get("base", Currency.USD.value))
             rates = {Currency(k): Decimal(str(v)) for k, v in payload["rates"].items() if k in Currency.__members__}
             provider_timestamp = _provider_timestamp(payload.get("timestamp"))
         except (ValueError, DecimalException, TypeError) as exc:
             raise bad_gateway(ERROR_UPSTREAM_BAD_RESPONSE, "Rate provider returned invalid rate data.") from exc
+        
         missing = set(Currency) - {base_currency} - set(rates)
         if missing or any(rate <= 0 for rate in rates.values()):
             raise bad_gateway(
@@ -103,13 +107,16 @@ class RateProvider:
         return ProviderRates(PROVIDER_FXAPI_APP, base_currency, rates, provider_timestamp, payload)
 
 
-def pair_mid_rate(provider_rates: ProviderRates, base: Currency, quote: Currency) -> Decimal:
-    """Calculate a pair rate from the provider's base-rate map."""
-    if base == provider_rates.base_currency:
-        return DECIMAL_ONE if quote == base else provider_rates.rates[quote]
+def pair_mid_rate(provider_rates: ProviderRates, quote: Currency) -> Decimal:
+    """Return the provider's rate for `quote` relative to its base currency.
+
+    Only direct lookups are needed: every stored pair has the provider's
+    base currency as its base. Cross-pair rates are not stored; they are
+    derived at quote time via `build_route()` + `price_leg()`.
+    """
     if quote == provider_rates.base_currency:
-        return DECIMAL_ONE / provider_rates.rates[base]
-    return provider_rates.rates[quote] / provider_rates.rates[base]
+        return DECIMAL_ONE
+    return provider_rates.rates[quote]
 
 
 def refresh_rates(
@@ -148,7 +155,7 @@ def _persist_successful_refresh(session: Session, rates: ProviderRates, started:
         RateRow(
             base_currency=base.value,
             quote_currency=quote.value,
-            mid_rate=round_rate(pair_mid_rate(rates, base, quote)),
+            mid_rate=round_rate(pair_mid_rate(rates, quote)),
         )
         for base, quote in CANONICAL_PAIRS
     )
